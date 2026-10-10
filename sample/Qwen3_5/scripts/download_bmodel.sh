@@ -91,6 +91,26 @@ function download_cv84x6_9b {
     popd
 }
 
+function download_cv84x6_35b {
+    if [ ! -d "../models/CV84X6" ]; then
+        mkdir -p ../models/CV84X6
+    fi
+    pushd ../models/CV84X6
+        python3 -m dfss --url=open@sophgo.com:/sophon-demo/Qwen3_5/qwen3.5-35b-int4-autoround_w4bf16_seq2048_cv84x6_4core_dynamic_20260917_182047.bmodel
+        python3 -m dfss --url=open@sophgo.com:/sophon-demo/Qwen3_5/qwen3.5-35b-int4-autoround_w4bf16_seq2048_cv84x6_4core_history_dynamic_20260918_122058.bmodel
+    popd
+}
+
+function download_cv84x6_35b_3.6 {
+    if [ ! -d "../models/CV84X6" ]; then
+        mkdir -p ../models/CV84X6
+    fi
+    pushd ../models/CV84X6
+        python3 -m dfss --url=open@sophgo.com:/sophon-demo/Qwen3_5/qwen3.6-35b-a3b-int4-mixed-autoround_w4bf16_seq2048_cv84x6_4core_dynamic_20260924_162342.bmodel
+        python3 -m dfss --url=open@sophgo.com:/sophon-demo/Qwen3_5/qwen3.6-35b-a3b-int4-mixed-autoround_w4bf16_seq2048_cv84x6_4core_history_dynamic_20260924_165230.bmodel
+    popd
+}
+
 if [ "$1" == "bm1684x_2b" ]; then
     download_datasets
     download_bm1684x_2b
@@ -112,6 +132,12 @@ elif [ "$1" == "cv84x6_4b" ]; then
 elif [ "$1" == "cv84x6_9b" ]; then
     download_datasets
     download_cv84x6_9b
+elif [ "$1" == "cv84x6_35b" ]; then
+    download_datasets
+    download_cv84x6_35b
+elif [ "$1" == "cv84x6_35b_3.6" ]; then
+    download_datasets
+    download_cv84x6_35b_3.6
 elif [ "$1" == "all" ]; then
     download_datasets
     download_bm1684x_2b
@@ -121,8 +147,9 @@ elif [ "$1" == "all" ]; then
     download_cv84x6_2b
     download_cv84x6_4b
     download_cv84x6_9b
+    download_cv84x6_35b
 else
     echo "Error Parameter"
-    echo "Usage: $0 [all|bm1684x_2b|bm1684x_4b|bm1684x_9b|bm1688|cv84x6_2b|cv84x6_4b|cv84x6_9b]"
+    echo "Usage: $0 [all|bm1684x_2b|bm1684x_4b|bm1684x_9b|bm1688|cv84x6_2b|cv84x6_4b|cv84x6_9b|cv84x6_35b|cv84x6_35b_3.6]"
     exit 1
 fi

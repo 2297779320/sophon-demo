@@ -40,6 +40,7 @@ SOPHON-DEMO提供的例子从易到难分为`tutorial`、`sample`、`application
 | [SCRFD](./sample/SCRFD/README.md)                             | 人脸检测          | C++/Python | FP32/FP16/INT8 | BM1684/BM1684X/CV84X6/BM1688/CV186X |
 | [ArcFace](./sample/ArcFace/README.md)                       | 人脸识别          | C++/Python | FP32/FP16/INT8 | BM1684X                      |
 | [segformer](./sample/segformer/README.md)                     | 语义分割          | C++/Python | FP32/FP16/INT8 | BM1684/BM1684X/BM1688/CV186X |
+| [YOLO26_sem](./sample/YOLO26_sem/README.md)                   | 语义分割          | C++/Python | FP32/FP16/INT8 | BM1684X/BM1688               |
 | [SAM](./sample/SAM/README.md)                                 | 语义分割          | Python     | FP32/FP16/INT8 | BM1684X                      |
 | [SAM2](./sample/SAM2/README.md)                               | 语义分割          | Python     | FP32/FP16/INT8 | BM1684X/BM1688               |
 | [Unet](./sample/Unet/README.md)                             | 语义分割          | C++/Python | FP32/FP16/INT8 | BM1684/BM1684X               |
@@ -49,8 +50,10 @@ SOPHON-DEMO提供的例子从易到难分为`tutorial`、`sample`、`application
 | [YOLOv9_seg](./sample/YOLOv9_seg/README.md)              | 实例分割          | C++/Python | FP32/FP16/INT8 | BM1684X/BM1688               |
 | [YOLO26_seg](./sample/YOLO26_seg/README.md)                   | 实例分割          | C++/Python | FP32/FP16/INT8 | BM1684X/BM1688               |
 | [PP-OCR](./sample/PP-OCR/README.md)                           | OCR              | C++/Python | FP32/FP16/INT8 | BM1684/BM1684X/BM1688/CV186X  |
+| [wechat_qrcode](./sample/wechat_qrcode/README.md)             | 二维码检测识别    | C++/Python | FP32/FP16      | BM1684X/BM1688/CV186X        |
 | [OpenPose](./sample/OpenPose/README.md)                       | 人体关键点检测    | C++/Python | FP32/FP16/INT8 | BM1684/BM1684X/CV84X6/BM1688        |
 | [YOLOv8_pose](./sample/YOLOv8_pose/README.md)                 | 人体关键点检测    | C++/Python | FP32/FP16/INT8 | BM1684/BM1684X/BM1688/CV186X |
+| [YOLO26_pose](./sample/YOLO26_pose/README.md)                 | 人体关键点检测    | C++/Python | FP32/FP16/INT8 | BM1684X/BM1688/CV186X |
 | [HRNet_pose](./sample/HRNet_pose/README.md)                   | 人体关键点检测    | C++/Python | FP32/FP16/INT8 | BM1684X/BM1688/CV186X        |
 | [C3D](./sample/C3D/README.md)                                 | 视频动作识别      | C++/Python | FP32/FP16/INT8 | BM1684/BM1684X/BM1688/CV186X |
 | [SlowFast](./sample/SlowFast/README.md)                       | 视频动作识别      | C++/Python | FP32/FP16/INT8 | BM1684X/BM1688               |
@@ -145,6 +148,8 @@ SOPHON-DEMO提供的例子从易到难分为`tutorial`、`sample`、`application
 ## 版本说明
 | 版本    | 说明 | 
 |---     |---   |
+| 0.3.13 | 完善和修复文档、代码问题，sample模块新增YOLO26_pose例程。|
+| 0.3.12 | 完善和修复文档、代码问题，sample模块新增YOLO26_sem例程。|
 | 0.3.11 | 完善和修复文档、代码问题，sample模块新增ArcFace、FearTracker、MobileNetV4、SeACoParaformer、Silero、Unet、YOLO_world_v2例程，application模块新增meeting_summary例程，部分sample新增int8 bmodel。|
 | 0.3.10 | 完善和修复文档、代码问题，移除FCENet例程，VITS_CHINESE新增C++例程，sample模块新增LFM2-VL例程。|
 | 0.3.9  | 完善和修复文档、代码问题，sample模块新增YOLO26、YOLO26_seg、YOLO26_obb、PaddleOCR-VL例程。|

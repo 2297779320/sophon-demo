@@ -14,11 +14,6 @@ outdir=../models/$target_dir
 function gen_mlir()
 {
     onnx_path=../models/onnx/yolov8s-seg.onnx
-    if test $model_name = "yolov8s"; then
-        onnx_path=../models/onnx/yolov8s-seg.onnx
-    elif test $model_name = "yolov9c"; then
-        onnx_path=../models/onnx/yolov9-c-seg-converted.onnx
-    fi
     model_transform.py \
         --model_name $model_name \
         --model_def $onnx_path \
@@ -34,11 +29,6 @@ function gen_mlir()
 function gen_cali_table()
 {
     onnx_path=../models/onnx/yolov8s-seg.onnx
-    if test $model_name = "yolov8s"; then
-        onnx_path=../models/onnx/yolov8s-seg.onnx
-    elif test $model_name = "yolov9c"; then
-        onnx_path=../models/onnx/yolov9-c-seg-converted.onnx
-    fi
     model_transform.py \
         --model_name $model_name \
         --model_def $onnx_path \
@@ -66,7 +56,7 @@ function gen_int8bmodel()
         --processor  $target \
         --fuse_preprocess \
         --calibration_table ${model_name}_seg_cali_table \
-        --quantize_table ${model_name}_seg_fuse_qtable_${target} \
+        --quantize_table ${model_name}_seg_fuse_qtable \
         --customization_format BGR_PACKED \
         --model ${model_name}_seg_fuse_int8_$1b.bmodel \
         --quant_output
@@ -80,7 +70,7 @@ function gen_int8bmodel()
             --processor  $target \
             --fuse_preprocess \
             --calibration_table ${model_name}_seg_cali_table \
-            --quantize_table ${model_name}_seg_fuse_qtable_${target} \
+            --quantize_table ${model_name}_seg_fuse_qtable \
             --customization_format BGR_PACKED \
             --num_core 2 \
             --model ${model_name}_seg_fuse_int8_$1b_2core.bmodel \
