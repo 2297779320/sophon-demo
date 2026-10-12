@@ -8,7 +8,7 @@
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
-| 音频流推理链（C API） | ✅ 完成 | PCM 推入 → VAD 切段 → ASR 整句识别 + CAM++ 声纹 → 说话人归属回调 |
+| 音频流推理链（C API） | ✅ 完成 | PCM 推入 → VAD 切段（**ONNX 版 fsmn_vad：静态 [1,20,400]+4 组 cache，LFR5 拼帧 + am.mvn + FunASR 官方端点状态机**）→ ASR 整句识别 + CAM++ 声纹 → 说话人归属回调 |
 | Link 框架 | ✅ 完成 | 字符串寻址 / 拉模型 / 对象池背压 / 双线程调度（VAD 线程 + 任务线程） |
 | 框架通用化（CAudioLinkMng 子类化） | ✅ 完成 | `CLinkMng` 拆分为通用基座 + 音频子类：基座持配置/对象池/段队列/通用 Ctrl，音频专属逻辑（默认链路/工厂分支/双线程/pushPcm/音频 Ctrl/音频校验/快照音频段）下沉 `CAudioLinkMng`，经 8 个 protected 虚钩子回接；行为零变化、C ABI 只增不改 |
 | 混合模型管理 | ✅ 完成 | **多文件分离**（每 bmodel 独立 bmrt 上下文，**无融合模型**）、子网动态枚举、JSON 角色映射、静态 shape 维度推导 |
@@ -22,7 +22,7 @@
 | 静音处理 | ✅ 完成 | 纯静音零下游开销；`max_seg_s` 强制切段（防连续噪音内存无界）；能量前置门（`energy_gate`，默认关闭）静音期跳过 VAD 推理 |
 | 纯 C 接入验证 | ✅ 完成 | `examples/sample_c.c`（纯 C99，仅新增不改已有 ABI） |
 | 内置重采样 | ✅ 完成 | `al_resample.h` 多相 FIR（48k/44.1k/8k→16k + 多声道混缩）；新 API `AudioLinkPushPcmEx`；16k 直推零开销路径逐字节兼容；格式首推锁定 |
-| 链路级自愈 | ✅ 完成 | VAD launch 失败 `resetCache` 后原地重试一次（只复位设备 cache，不动端点状态机 / 滚动缓冲——音频已在缓冲中，段连续性不受影响）；ASR 失败 clear_history 重试；3 连败升级上报；`get_stats` 含 self_heal_count |
+| 链路级自愈 | ✅ 完成 | VAD launch 失败段状态软复位后原地重试一次（T=20 路线无设备 cache，不动端点状态机/滚动缓冲）；ASR 失败 clear_history 重试；3 连败升级上报；`get_stats` 含 self_heal_count |
 | 配置启动校验强化 | ✅ 完成 | `ValidateConfig` 两段式（必需键/数值范围/文件存在 + roles 命中）；`strict` 开关（默认宽松）；报错含完整 JSON 路径 |
 | 动态配置接口 | ✅ 完成 | 各 Link 专用 Ctrl 命令（13 个：vad 7 / asr 3 / diarize 2 / pcm 1，数值统一 double 协议）+ get_params + save_params 持久化，立即生效、tmp+rename 原子写回 |
 | KV 免拷贝（io_alone） | ✅ 完成 | init 双重检测（addr_mode==1 + block_cache_0 KV 输入/输出地址运行时比对）；io_alone=true：prefill KV 原地写（免 2×NUM_LAYERS d2d）+ decode 偏移原地写；false：BASIC 回退逐层 d2d（⚠️ 双分支行为待板端实测） |
@@ -36,7 +36,7 @@
 | 静态核验 | 符号/类型/逻辑逐条人工级核查；死代码已清零；退出钩子机制按决策移除（状态快照改由 Stop 直接触发）；近期新增代码块已按 rk_libs 风格整改（专用命令重写 + al_resample/al_json/link_mng 新增段） |
 | 编码规范 | rk_libs 风格编码规范已入 CODEBUDDY.md（第 7 条 C++ 映射：T_ 类/类型前缀成员/大驼峰/禁异常/al_log；细则：override 跟随基类、调用存量方法保现名、vec/mtx 前缀约定）；**适用范围：新写与大改代码严格执行**，存量不主动重构 |
 | **编译验证** | 🟡 就绪工作已完成（CMakeLists 补 asr_link.cpp/SDK 规范化/fail-fast、build_soc.sh 修复、tokenizer 资产已拷入、vad CMVN 键移除），**待在 BM1688 SDK（≥23.x）环境执行首次交叉编译**；⚠️ mel_filters.npy 为资产缺口（whisper npz 转换或模型方提供） |
-| **板端实测** | ⚠️ **未做**（模型加载/VAD 子网 I/O 约定/数值精度均待实机确认） |
+| **板端实测** | ⚠️ **未做**（待验证：模型加载/VAD T=20+cache 协议与 AddShift 方向/端点状态机段边界对比 funasr_onnx/spk 静态 shape 对齐/数值精度） |
 | 单元测试 / CI | ⚠️ 无（决策暂缓，见 commercial_roadmap.md 风险节） |
 | 已知遗留 | al_json 递归深度上限、npy header 上限、VAD rename 失败重试、错误码语义统一（均低风险，记录于 code_review_report.md） |
 

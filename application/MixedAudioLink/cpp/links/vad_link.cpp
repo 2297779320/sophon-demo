@@ -588,8 +588,10 @@ void CVadLink::runGroup(int real_rows, int64_t frame0, bool is_final) {
                           ", fail_streak=" + std::to_string(iFailStreak);
         if (1 == iFailStreak) mng()->logWarn(msg);
         else if (3 == iFailStreak) mng()->logErr(msg + " (persistent)");
-        /* 本组无判决：合成"全静音"喂状态机（帧栅格连续，在途段将在 max_end_silence 后收尾） */
-        pushDecisions(std::vector<uint8_t>((size_t)real_rows, 0u), frame0, is_final);
+        /* 本组无判决：跳过（判决流允许帧缺口，后续组按 frame0 续推）。
+         * 不合成"全静音"——在途语音段不会被静音判停截短，失败恢复后状态机自补。
+         * flush 组（is_final）无法走正常判决 → 强制收口在途段 */
+        if (is_final) closeInProgress();
         return;
     }
     iFailStreak = 0;
@@ -603,9 +605,8 @@ void CVadLink::runGroup(int real_rows, int64_t frame0, bool is_final) {
 std::vector<uint8_t> CVadLink::probsToDecisions(const std::vector<float> &probs, int frames) {
     /* 逐帧判决（funasr FsmnVADStreaming::GetFrameState）：
      *   P_sil = scores[t][sil_pdf_id]（网络输出已含 Softmax，故为概率）
-     *   speech iff exp(speech_prob) >= exp(noise_prob) + thres
-     *           即 (1 - P_sil) >= P_sil^ratio + speech_noise_thres
-     * ratio=1.0、thres=0.6 时等价于 P_sil <= 0.2。 */
+     *   speech iff (1 - P_sil) >= P_sil^ratio + speech_noise_thres
+     *           （ratio=1.0、thres=0.6 时等价于 P_sil <= 0.2）。 */
     std::vector<uint8_t> is_speech;
     if (frames <= 0) return is_speech;
     is_speech.reserve((size_t)frames);
