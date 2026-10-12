@@ -23,7 +23,26 @@ public:
 
     int create(const JsonValue *cfg, AL_PARAM param) override {
         (void)cfg; (void)param;
-        FbankConfig fc;   /* CAM++ 惯例：80 bins / 25 / 10ms */
+        /* spk fbank：严格对齐 CAM++/3D-Speaker 官方前端（sample/CAM++/cpp/main.cpp
+         * 的 speakerlab::FbankOptions 默认 + 运行时覆盖）：
+         *   80 bins / 16k / 25ms / 10ms / preemph 0.97 / 逐帧去直流
+         *   window=povey（(0.5-0.5cos)^0.85）/ high_freq=0（→Nyquist 全带宽）
+         *   dither=0（官方运行时把默认 1.0 覆盖为 0）/ power 谱 / log
+         *   sample_scale=1/32767（官方 WavReader 先归一化到 [-1,1] 再算 fbank）
+         * 与 VAD 的 funasr 前端（hamming + high_freq=-400 + int16 量纲）区分开，故此处显式给出 */
+        FbankConfig fc;
+        fc.num_mel_bins = 80;
+        fc.sample_rate   = 16000;
+        fc.frame_ms      = 25;
+        fc.shift_ms      = 10;
+        fc.preemph       = 0.97f;
+        fc.low_freq      = 20.0f;
+        fc.high_freq     = 0.0f;          /* kaldi 约定：<=0 → Nyquist + high_freq = 8000 */
+        fc.remove_dc     = true;
+        fc.use_log       = true;
+        fc.dither        = 0.0f;
+        fc.sample_scale  = 1.0f / 32767.0f;
+        fc.window        = FBANK_WIN_POVEY;
         m_spk_fbank.reset(new FbankComputer(fc));
         return E_AL_OK;
     }

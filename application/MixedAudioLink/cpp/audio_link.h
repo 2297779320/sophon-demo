@@ -159,9 +159,10 @@ int AudioLinkPushPcmEx(AL_HANDLE mgr, const void *pcm, int bytes, int sample_rat
  *   "clear_history"  : 清空 asr KV history（enable_history=true 时有效）
  *   专用配置命令      : 数值统一 double 协议（AL_PARAM{&dVal, sizeof(double)}；
  *                      set_system_prompt 为字符串 AL_PARAM{str, len}），运行期热调
- *                      立即生效——vad: set_min_silence_ms / set_min_speech_ms /
- *                      set_noise_thres / set_max_seg_s / set_gate_enable /
- *                      set_gate_rms / set_gate_hold_ms；asr: set_max_new_tokens /
+ *                      立即生效——vad: set_max_end_silence_ms /
+ *                      set_sil_to_speech_time_ms / set_noise_thres / set_max_seg_s /
+ *                      set_gate_enable / set_gate_rms / set_gate_hold_ms；
+ *                      asr: set_max_new_tokens /
  *                      set_system_prompt / set_enable_history；diarize:
  *                      set_threshold / set_max_speakers；pcm: set_ring_ms
  *                      （协议与参数清单见 docs/API.md 动态配置节）
