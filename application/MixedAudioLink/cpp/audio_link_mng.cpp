@@ -339,22 +339,27 @@ std::string CAudioLinkMng::validateAudio(bool after_hub) {
     if (has_asr) {
         if (!asr || !asr->isObj())
             return "asr: required section missing";
-        for (const char *k : {"mel_filters", "vocab", "merges"}) {
+        for (const char *k : {"vocab", "merges"}) {
             std::string path = asr->getStr(k);
             if (path.empty())
                 return std::string("asr.") + k + ": required key missing";
-            if (!configFileExists(path))
-                return std::string("asr.") + k + ": file not found: " + path;
+            if (!configFileExists(resolveAsset(path)))
+                return std::string("asr.") + k + ": file not found: " + resolveAsset(path);
         }
+        /* mel_filters 可选：缺省走 slaney 现算回退（asr_mel.h buildSlaneyFilterbank）；
+         * 填写即校验文件存在。npy 就位后加回 asr.mel_filters 键即可启用精确滤波器 */
+        std::string mf = asr->getStr("mel_filters");
+        if (!mf.empty() && !configFileExists(resolveAsset(mf)))
+            return "asr.mel_filters: file not found: " + resolveAsset(mf);
     }
 
-    /* 可选文件键：填写即校验（vad CMVN npy） */
+    /* 可选文件键：填写即校验（vad cmvn_file(am.mvn) / CMVN npy） */
     auto vad = root->get("vad");
     if (vad && vad->isObj()) {
-        for (const char *k : {"cmvn_mean", "cmvn_std"}) {
+        for (const char *k : {"cmvn_file", "cmvn_mean", "cmvn_std"}) {
             std::string path = vad->getStr(k);
-            if (!path.empty() && !configFileExists(path))
-                return std::string("vad.") + k + ": file not found: " + path;
+            if (!path.empty() && !configFileExists(resolveAsset(path)))
+                return std::string("vad.") + k + ": file not found: " + resolveAsset(path);
         }
     }
 

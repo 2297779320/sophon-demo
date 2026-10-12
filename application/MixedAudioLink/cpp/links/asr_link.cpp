@@ -45,7 +45,7 @@ int CAsrLink::create(const JsonValue *cfg, AL_PARAM param) {
     AsrMel::Config mc;
     mc.audio_length = d.AUDIO_LENGTH;
     if (asr_cfg) {
-        mc.mel_filters_npy = asr_cfg->getStr("mel_filters", "");
+        mc.mel_filters_npy = mng()->resolveAsset(asr_cfg->getStr("mel_filters", ""));
         mc.feature_size = (int)asr_cfg->getNum("mel_bins", 128);
     }
     if (mc.feature_size != d.AUDIO_MEL_BINS)
@@ -54,9 +54,9 @@ int CAsrLink::create(const JsonValue *cfg, AL_PARAM param) {
     mc.feature_size = d.AUDIO_MEL_BINS;
     m_mel.init(mc);
 
-    /* tokenizer */
-    std::string vocab = asr_cfg ? asr_cfg->getStr("vocab", "config/vocab.json") : "config/vocab.json";
-    std::string merges = asr_cfg ? asr_cfg->getStr("merges", "config/merges.txt") : "config/merges.txt";
+    /* tokenizer（相对路径以启动 JSON 所在目录为基准解析） */
+    std::string vocab = mng()->resolveAsset(asr_cfg ? asr_cfg->getStr("vocab", "vocab.json") : "vocab.json");
+    std::string merges = mng()->resolveAsset(asr_cfg ? asr_cfg->getStr("merges", "merges.txt") : "merges.txt");
     std::map<std::string, int> specials = {
         {"<|im_end|>", 151645}, {"<|im_start|>", 151644},
         {"<|audio_start|>", 151669}, {"<|audio_end|>", 151670},

@@ -12,6 +12,7 @@
 
 #include "al_json.h"
 #include "al_log.h"
+#include "al_path.h"
 #include "link_mng.h"      /* 复用 model_hub / text_llm / tokenizer */
 #include "text_llm.h"
 
@@ -27,9 +28,15 @@ public:
     std::string prompt_template;
     std::string system_prompt;
     std::string last_err;
+    std::string cfg_dir;   /* 启动 JSON 所在目录（配置内资产相对路径基准） */
     /* 可选流式回调（Ctrl "set_partial_cb"）：单块/合并终总结阶段逐词透传 */
     AL_PARTIAL_CB partial_cb = nullptr;
     void *partial_user = nullptr;
+
+    /* 配置内资产路径解析：相对路径以 cfg_dir 为基准（实现见 cpp/al_path.h，规则同 CLinkMng::resolveAsset） */
+    std::string resolveAsset(const std::string &p) const {
+        return al::resolveAsset(cfg_dir, p);
+    }
 };
 
 /* 统一错误出口：记录 last_err 并同步 al_log ERROR（本模块无 mgr 句柄，tag="summary"） */
@@ -288,8 +295,10 @@ AL_HANDLE MeetingSummaryInit(const char *json_cfg, int dev_id) {
         std::string err;
         auto cfg = JsonParser::parse(text, err);
         if (!cfg) { summarySetErr(s, "config parse: " + err); goto fail; }
+        s->cfg_dir = json_cfg;   /* 资产相对路径解析基准（JSON 所在目录） */
 
-        /* 模型加载（独立 CModelHub 实例，独立 bm_handle） */
+        /* 模型加载（独立 CModelHub 实例，独立 bm_handle）；models.*.path 以
+         * **应用根（启动 CWD）**为解析基准（与 CLinkMng::resolveModelPath 一致） */
         std::string hub_err = s->hub.init(cfg->get("models").get(), dev_id);
         if (!hub_err.empty()) { summarySetErr(s, hub_err); goto fail; }
         /* 定位唯一的 LLM 模型并推导维度 */
@@ -311,10 +320,10 @@ AL_HANDLE MeetingSummaryInit(const char *json_cfg, int dev_id) {
         AL_LOG_I("summary", "summary init: llm ok (io_alone=%d, layers=%d)",
                  (int)s->llm.ioAlone(), s->llm.dims().NUM_LAYERS);
 
-        /* tokenizer */
+        /* tokenizer（相对路径以启动 JSON 所在目录为基准解析） */
         auto sc = cfg->get("summary");
-        std::string vocab = sc ? sc->getStr("vocab", "config/vocab.json") : "config/vocab.json";
-        std::string merges = sc ? sc->getStr("merges", "config/merges.txt") : "config/merges.txt";
+        std::string vocab = s->resolveAsset(sc ? sc->getStr("vocab", "summary_vocab.json") : "summary_vocab.json");
+        std::string merges = s->resolveAsset(sc ? sc->getStr("merges", "summary_merges.txt") : "summary_merges.txt");
         std::map<std::string, int> specials = {
             {"<|im_end|>", 151645}, {"<|im_start|>", 151644},
         };
@@ -328,7 +337,7 @@ AL_HANDLE MeetingSummaryInit(const char *json_cfg, int dev_id) {
         s->system_prompt = sc ? sc->getStr("system_prompt", kDefaultSystemPrompt)
                               : kDefaultSystemPrompt;
         /* prompt 加载顺序：prompt_file（外置文本文件）> prompt_template（JSON 内联）> 内置默认模板 */
-        std::string pf = sc ? sc->getStr("prompt_file", "") : "";
+        std::string pf = s->resolveAsset(sc ? sc->getStr("prompt_file", "") : "");
         if (!pf.empty()) {
             std::string ftext = readFileAll2(pf.c_str());
             if (ftext.empty() || ftext.find("{transcript}") == std::string::npos) {

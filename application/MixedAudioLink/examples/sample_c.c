@@ -19,12 +19,12 @@
  *
  * 运行：
  *   音频流模式（默认全常驻：asr/spk/vad 与总结模型同时驻留，总结零加载延迟）：
- *   ./sample_c -c ../config/audio_link.json -s ../config/meeting_summary.json \
+ *   ./sample_c -c ../config/audio/audio_link.json -s ../config/summary/meeting_summary.json \
  *              -d 0 -i ../test16k.wav
  *   小显存设备加 --swap 走换入换出时序（总结前卸 asr，总结后重载）：
- *   ./sample_c --swap -c ../config/audio_link.json -i ../test16k.wav
+ *   ./sample_c --swap -c ../config/audio/audio_link.json -i ../test16k.wav
  *   独立总结模式（对齐官方 meeting_summary 例程三件套用法，不依赖音频流）：
- *   ./sample_c -s ../config/meeting_summary.json -d 0 -t meeting.txt
+ *   ./sample_c -s ../config/summary/meeting_summary.json -d 0 -t meeting.txt
  *   （音频流/独立总结两种模式总结结果均落盘 summary_output.txt）
  *
  *============================================================================*/
@@ -106,8 +106,8 @@ static void write_summary_file(const char *summary)
 
 int main(int argc, char *argv[])
 {
-    const char *audio_cfg  = "../config/audio_link.json";
-    const char *summary_cfg = "../config/meeting_summary.json";
+    const char *audio_cfg  = "../config/audio/audio_link.json";
+    const char *summary_cfg = "../config/summary/meeting_summary.json";
     const char *wav_path   = NULL;
     const char *text_path  = NULL;
     int dev_id = 0;

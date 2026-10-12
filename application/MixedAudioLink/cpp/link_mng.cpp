@@ -15,6 +15,7 @@
 
 #include "al_json.h"
 #include "al_log.h"
+#include "al_path.h"
 
 namespace al {
 
@@ -188,8 +189,8 @@ std::string CLinkMng::ValidateConfig(bool after_hub) {
             std::string path = kv.second ? kv.second->getStr("path") : "";
             if (path.empty())
                 return "models." + kv.first + ".path: required key missing";
-            if (!configFileExists(path))
-                return "models." + kv.first + ".path: file not found: " + path;
+            if (!configFileExists(resolveModelPath(path)))
+                return "models." + kv.first + ".path: file not found: " + resolveModelPath(path);
         }
 
         /* 工作流专属键校验（必需键/数值范围，子类钩子） */
@@ -230,6 +231,10 @@ int CLinkMng::init(const char *json_cfg, int dev_id) {
     m_cfg = JsonParser::parse(text, err);
     if (!m_cfg) return setLastError("config parse: " + err), logErr("config parse: " + err), E_AL_PARAM_ERR;
 
+    /* 记下启动配置路径：ValidateConfig 的资产路径解析（resolveAsset 以此为基准）
+     * 即需可用，亦为 Ctrl "save_params" 原子写回用 */
+    strCfgPath = json_cfg;
+
     /* 日志配置（在模型加载前应用，加载期日志即可入文件）：
      * log.level = 0..3（默认 2=INFO），log.file = 空串走 stderr，log.max_bytes 轮转阈值 */
     if (auto lg = m_cfg->get("log")) {
@@ -251,6 +256,8 @@ int CLinkMng::init(const char *json_cfg, int dev_id) {
         logWarn("config validate: " + verr + " (non-strict, continue with defaults)");
     }
 
+    /* models.*.path 相对路径以**应用根（启动 CWD）**为基准解析（resolveModelPath），
+     * 与配置资产（resolveAsset，JSON 所在目录）区分开：模型随应用部署，资产随配置走 */
     std::string hub_err = m_hub.init(m_cfg->get("models").get(), dev_id);
     if (!hub_err.empty()) return setLastError(hub_err), logErr(hub_err), E_AL_MODEL_LOAD_FAIL;
 
@@ -271,8 +278,6 @@ int CLinkMng::init(const char *json_cfg, int dev_id) {
     /* 工作流默认链路创建（子类钩子：内部已 setLastError，失败原样上抛） */
     int rc = createLinks();
     if (rc != E_AL_OK) return rc;
-    /* 成功路径：记下启动配置路径（Ctrl "save_params" 原子写回用） */
-    strCfgPath = json_cfg;
     long long init_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - t_init0).count();
     log("init done in " + std::to_string(init_ms) + " ms, " +
@@ -493,6 +498,16 @@ CBaseLink *CLinkMng::findLink(const std::string &name) {
 const JsonValue *CLinkMng::section(const std::string &key) const {
     if (!m_cfg) return nullptr;
     return m_cfg->get(key).get();
+}
+
+/* 配置内资产路径解析：相对路径以启动 JSON 所在目录为基准（实现见 cpp/al_path.h） */
+std::string CLinkMng::resolveAsset(const std::string &p) const {
+    return al::resolveAsset(strCfgPath, p);
+}
+
+/* 模型文件路径解析：相对路径以**应用根（启动 CWD）**为基准（实现见 cpp/al_path.h） */
+std::string CLinkMng::resolveModelPath(const std::string &p) const {
+    return al::resolveModelPath(p);
 }
 
 /*============================ 动态配置写回 ============================*/

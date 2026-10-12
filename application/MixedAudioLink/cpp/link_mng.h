@@ -118,6 +118,15 @@ public:
     const JsonValue *rootCfg() const { return m_cfg.get(); }
     const JsonValue *section(const std::string &key) const;
 
+    /** 配置内资产路径解析：相对路径以启动 JSON 所在目录为基准
+     *  （空串/绝对路径原样返回；返回统一 POSIX '/' 分隔符） */
+    std::string resolveAsset(const std::string &p) const;
+
+    /** 模型文件路径解析：相对路径以**应用根（启动 CWD）**为基准
+     *  （空串/绝对路径原样返回；返回统一 POSIX '/' 分隔符）。
+     *  与 resolveAsset 区分：models.*.path 随应用部署走，配置资产随 JSON 走 */
+    std::string resolveModelPath(const std::string &p) const;
+
     /* ---- 动态配置写回（Link 专用配置命令配套，修改立即反映到内存配置树） ----
      * sec 必须已存在（不存在返回 false），key 允许新增到已存在 sec；
      * 四参重载的 sub 可传空串，sub 节不存在时自动创建（落在 sec.sub.key 原位置） */

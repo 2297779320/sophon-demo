@@ -38,7 +38,9 @@ public:
         return E_AL_OK;
     }
 
-    /** fbank[rows, cols] → embedding 向量 */
+    /** fbank[rows, cols] → embedding 向量
+     *  shape 策略：dynamic bmodel 用实际 rows；静态 bmodel 按 net_info dims
+     *  补零/截断对齐（rows > T_max 截断保前段，rows < T_max 右补零） */
     int processSegment(const std::vector<float> &fbank, std::vector<float> &emb) {
         int rows = m_last_rows, cols = m_last_cols;
         if (rows <= 0 || cols <= 0 || fbank.size() != (size_t)rows * cols)
@@ -47,16 +49,26 @@ public:
         bm_handle_t h = (bm_handle_t)bmrt_get_bm_handle(mng()->hub().model(m_model)->bmrt);
         void *bmrt = mng()->hub().model(m_model)->bmrt;
 
-        /* 输入张量：[max_batch, rows, cols] float32（campplus.hpp 同款） */
+        /* 输入 shape：dynamic=实际 rows；静态=net_info dims（补零/截断对齐） */
+        std::vector<float> feat_in(fbank);
+        auto &ish = m_info->stages[0].input_shapes[0];
+        int rows_in = rows, batch_in = m_max_batch;
+        if (!m_info->is_dynamic && (3 == ish.num_dims)) {
+            batch_in = (int)ish.dims[0];
+            rows_in = (int)ish.dims[1];
+            if (rows_in != rows) feat_in.resize((size_t)rows_in * cols, 0.0f);
+        }
+
+        /* 输入张量：[batch, rows_in, cols] float32（campplus.hpp 同款） */
         bm_tensor_t in, out;
-        if (BM_SUCCESS != bmrt_tensor(&in, bmrt, BM_FLOAT32, {3, {m_max_batch, rows, cols}}))
+        if (BM_SUCCESS != bmrt_tensor(&in, bmrt, BM_FLOAT32, {3, {batch_in, rows_in, cols}}))
             return E_AL_INTERNAL_ERR;
-        size_t real_bytes = fbank.size() * sizeof(float);
+        size_t real_bytes = feat_in.size() * sizeof(float);
         if (real_bytes > (size_t)m_info->max_input_bytes[0]) {
             bm_free_device(h, in.device_mem);
             return E_AL_NET_NOT_MATCH; /* 超过模型允许的最大输入 */
         }
-        if (BM_SUCCESS != bm_memcpy_s2d_partial(h, in.device_mem, (void *)fbank.data(), real_bytes)) {
+        if (BM_SUCCESS != bm_memcpy_s2d_partial(h, in.device_mem, (void *)feat_in.data(), real_bytes)) {
             bm_free_device(h, in.device_mem);
             return E_AL_LAUNCH_FAIL;
         }

@@ -1,7 +1,7 @@
 //===----------------------------------------------------------------------===//
 //
 // main.cpp - MixedAudioLink demo
-// 用法：./audiolink_demo -c config/audio_link.json -d 0 -i test16k.wav
+// 用法：./audiolink_demo -c config/audio/audio_link.json -d 0 -i test16k.wav
 // 模拟实时流：按 100ms 步长将 wav 切块推入 AudioLinkPushPcm，
 // 结果经 AL_RESULT_CB 打印（文本 + 声纹向量维度/首元素）。
 //
@@ -71,7 +71,7 @@ static void onResult(const AL_RESULT *r, void *user) {
 }
 
 int main(int argc, char *argv[]) {
-    const char *cfg = "config/audio_link.json";
+    const char *cfg = "config/audio/audio_link.json";
     const char *wav = nullptr;
     int devid = 0;
     for (int i = 1; i < argc; i++) {
@@ -137,7 +137,7 @@ int main(int argc, char *argv[]) {
         printf("unload asr model...\n");
         AudioLinkCtrl(mgr, "asr", "unload_model", AL_PARAM{nullptr, 0});
 
-        AL_HANDLE sm = MeetingSummaryInit("config/meeting_summary.json", devid);
+        AL_HANDLE sm = MeetingSummaryInit("config/summary/meeting_summary.json", devid);
         if (sm) {
             char summary[8192] = {0};
             p.data = summary;
