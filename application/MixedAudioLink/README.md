@@ -56,7 +56,7 @@ MixedAudioLink/
 ├── config/audio/               # audio_link.json + vocab/merges/mel_filters.npy/am.mvn
 ├── config/summary/             # meeting_summary.json + vocab/merges/prompt
 ├── models/                     # bmodel 落位目录（大文件不入仓，见 .gitkeep）
-├── scripts/                    # build_soc.sh / download_model.sh / convert_vad.sh
+├── scripts/                    # build_soc.sh / download_model.sh / convert_vad.sh / pack_board_test.sh
 ├── tools/                      # 对拍与回归脚本 + 单测
 ├── docs/                       # 使用者文档（见 §5）
 └── CMakeLists.txt
@@ -147,6 +147,22 @@ gcc -std=c99 -O2 -I cpp -I "$SDK/include" \
 |---|---|---|
 | 模型文件 | `models.*.path` | **应用根（启动 CWD）** |
 | 配置资产 | `vocab` / `merges` / `mel_filters` / `cmvn_file` / `prompt_file` | **启动 JSON 所在目录** |
+
+### 板端实测打包
+
+把「可执行 + 配置 + 模型 + 测试素材 + 板端驱动脚本」打成一个自包含目录，直接拷到板子上跑：
+
+```bash
+bash scripts/pack_board_test.sh                  # 全部 4 个 bmodel（≈8.8GB）
+bash scripts/pack_board_test.sh --small-models   # 只含 vad+spk（≈37MB）
+bash scripts/pack_board_test.sh --tar            # 同时出一个 .tar
+```
+
+> 板端是 aarch64，脚本会**自动转交容器（默认 `soc-cross`）内打包**——
+> Windows 上 `chmod` 无效、tar 的 mode 也会错。产出在 `dist/board_test_<时间戳>/`，
+> 包内 `run_board_test.sh` 覆盖 4 个场景（完整时序 / C ABI / `--swap` 显存换入换出 /
+> 纯文本总结），自带环境自检、`ldd` 缺库检查与 `bm-smi` 前后对比。
+> 板端已自带 libsophon，故默认不打包运行库（缺库时加 `--with-libs`）。
 
 ## 5. 文档
 

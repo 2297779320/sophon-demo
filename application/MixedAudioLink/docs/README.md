@@ -136,7 +136,7 @@ application/MixedAudioLink/
 ├── config/summary/             # 总结：meeting_summary.json + vocab/merges/prompt
 ├── models/                     # bmodel 落位（大文件不入仓，.gitkeep + scripts 获取）
 ├── docs/                       # 使用者文档：README / API / dataflow / status / model_*
-├── scripts/                    # build_soc.sh / download_model.sh / convert_vad.sh
+├── scripts/                    # build_soc.sh / download_model.sh / convert_vad.sh / pack_board_test.sh
 ├── tools/                      # 对拍与回归 + 单测（随仓）
 └── CMakeLists.txt
 ```
