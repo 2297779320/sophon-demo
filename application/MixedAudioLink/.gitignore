@@ -1,0 +1,24 @@
+# ---- 构建产物 ----
+build/
+tools/_out/
+*.o
+*.so
+*.a
+
+# ---- 模型：大文件不入仓，由脚本获取 ----
+#   models/*.bmodel          scripts/download_model.sh（asr/campplus/summary）
+#   models/fsmn_vad.bmodel   scripts/convert_vad.sh（静态 T=20，自转）
+models/*.bmodel
+models/*.bak
+
+# ---- 测试音频：不入仓，scripts/download_model.sh datasets 可取一段 16k 单声道 ----
+test16k.wav
+summary_output.txt
+
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- 转换中间产物 ----
+build/vad_t*/
+*.mlir

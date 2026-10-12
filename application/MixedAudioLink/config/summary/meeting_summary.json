@@ -1,0 +1,24 @@
+{
+  "_comment": "MeetingSummary 会议总结模块配置。总结模型为 text-only LLM（LLM-TPU chat 格式：embedding/block_i/block_cache_i/lm_head[/greedy_head]，无 audio 子网）。路径基准（双基准）：models.*.path 相对**应用根（启动 CWD）**解析；vocab/merges/prompt_file 相对本 JSON 所在目录解析。",
+  "models": {
+    "summary": {
+      "path": "models/qwen1.5-7b_int4_6k_1dev.bmodel",
+      "roles": {
+        "asr_llm": "embedding|block_|lm_head|greedy_head"
+      }
+    }
+  },
+  "summary": {
+    "vocab": "summary_vocab.json",
+    "merges": "summary_merges.txt",
+    "system_prompt": "你是一个会议纪要助手，你的作用是将一段会议文本总结为会议摘要。",
+    "prompt_file": "summary_prompt.txt",
+    "max_new_tokens": 512
+  },
+  "dims": {
+    "seq_len": "auto",
+    "max_input_length": "auto",
+    "hidden_size": "auto",
+    "num_layers": "auto"
+  }
+}
