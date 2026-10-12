@@ -26,36 +26,34 @@ docs/API.md 动态配置节）。
 
 ## 2. FSMN VAD（vad_link）
 
-子网 I/O 约定（JSON 可覆盖，默认按 LLM-TPU 惯例）：
-- `inputs[0]`：fbank `[1, T, 80]`，静态 T（T = chunk 对应帧数）；
-- `inputs[1..n-1]`：in_cache（块间状态，静态 shape）；
-- `outputs[0]`：每帧概率，`[T,2]` 取 `[:,1]` 为语音概率，`[T]` 直读；
+子网 I/O 约定（**静态 shape**，须与 `model_tool --info` 一致）：
+- `inputs[0]`：LFR 特征 `[1, T, 400]`（80 fbank × LFR5），**T 固定 = `vad.chunk_ms`/10**（默认 20）；
+- `inputs[1..n-1]`：in_cache `[1,128,19,1]` ×4（块间状态，静态）；
+- `outputs[0]`：每帧 248 类概率 `[1, T, 248]`（网络已含 Softmax），取 `[:, sil_pdf_id]`（=0）为静音概率；
 - `outputs[1..n-1]`：out_cache，`bm_memcpy_d2d_byte` 回写 in_cache
   （与 LLM block_cache 相同的 d2d 模式）。
+- **特征 FIFO**：前端每块产出的行数随 carry-over 浮动（14/20/20…），攒满 T 行才
+  launch 一次；flush 时不足 T 的尾组补零凑齐再跑（因果 FSMN：补零行不影响前 rem 行输出）。
 
 前处理（funasr 官方默认，JSON `vad.fbank` 可调）：
-去直流 → kaldi 风格 fbank（80 bins / 25ms / 10ms / 预加重 0.97）→ CMVN
-（`vad.cmvn_mean/std` npy 文件，加载校验维度，缺省禁用）。
+去直流 → kaldi 风格 fbank（80 bins / 25ms / 10ms）→ LFR（80→400，左补首帧 + 尾部延迟）
+→ CMVN（`vad.cmvn_file` 指向 kaldi `am.mvn`，`(x+AddShift)*Rescale`；缺省回退 npy mean/std）。
 
-切段状态机（对齐 funasr `speech_noise_thres` 语义 `p = p_speech - thres*p_sil`）：
-- 帧计时：真实帧间隔 = fbank 帧移（`frameShift()`，默认 160 样本 = 10ms），
-  转写时间戳 = `chunk_beg + 帧号 × 帧移ms`，onset 样本偏移 = `onset帧号 × 帧移样本数`，
-  分钟级无累计漂移；
-- launch 前按概率输出 shape 推 T_out/通道数（`[T]`/`[T,2]`/`[1,T(,2)]`），
-  fbank rows != T_out 时记日志并返回 `E_AL_NET_NOT_MATCH` 跳过本块（不做静默截断）；
-- 空闲：`p>0` 累计，达 `min_speech_ms`（250）确认起点（回退 padding 300ms），
-  预卷缓冲入段（预卷缓冲每块追加/裁剪一次；语音起点落在块中间时，
-  从 onset 样本偏移起把该块剩余部分接入段）；
-- 说话中：每块整段追加进当前段，静音连续达 `min_silence_ms`（500）→
-  段尾 = 最后语音帧 + padding → 出段并 cache 归零（funasr `cache={}` 语义）；
-- `Ctrl "flush"`：强制收尾 `is_final=true`；
-- **强制切段上限**（`vad.max_seg_s`，默认 30s）：连续噪音/音乐下 VAD 一直判
-  in_speech 时，段长达到上限即强制切段下发（is_final=true，日志标记），防止
-  `m_seg_pcm` 无界增长与 ASR 输入超预算；
-- **能量前置门**（`vad.energy_gate`，默认关闭）：非语音 + 块 RMS 低于
-  `rms_thres` 时跳过 VAD 推理与 fbank 计算（省 TPU/功耗，7x24 设备静音期
-  近零开销）；`hold_ms`（默认 600ms）挂起期保证语音结束后状态机正常收尾；
-  块级判定不丢音频——本块 RMS 超阈即恢复全速。
+切段状态机（**逐行移植 funasr `WindowDetector` + `FsmnVADStreaming`**，见 `cpp/vad_segmenter.h`；
+离线对拍 97/97 bit-exact，见 `tools/vad_seg_ref.py`）：
+- 逐帧判决 `speech iff (1−P_sil) ≥ P_sil^ratio + speech_noise_thres`（ratio=1.0、thres=0.6）；
+- 20 帧环形窗投票（≥15 帧语音→起、≤15→止）+ 四分支端点机；
+  判停帧数 = (`max_end_silence_ms` − `speech_to_sil_time_ms`)/10ms（默认 (800−150)/10 = 65 帧）；
+- `do_extend` 起段回看 `lookback_time_start_point_ms`（200ms）、末端前瞻
+  `lookahead_time_end_point_ms`（100ms）；
+- 段边界 = `start_frame×10ms` 到 `(end_frame+1)×10ms`；段尾按 funasr 语义**逐帧 pop**
+  （每帧 160 样本），仅流末 `is_final` 才补 `frame_length−frame_shift`=240 样本；
+- `Ctrl "flush"`：强制收尾 `is_final=true`（补 LFR 尾帧后按末帧最终收段）；
+- **强制切段上限**（`vad.max_seg_s`，默认 20s = funasr `max_single_segment_time`）：
+  连续噪音/音乐下 VAD 一直判 in_speech 时，段长达到上限即强制切段下发（is_final=true）；
+- **能量前置门**（`vad.energy_gate`，默认关闭）：低能量块**只标注**不进网络的 FIFO 行，
+  成组推理时**整组全被跳过**才不发网络（混合组照常推理）；fbank/LFR 前处理照常推进，
+  保证帧栅格连续、时间戳不漂移。
 
 ## 3. 特征三支路（feat_link / asr_mel）
 
@@ -161,8 +159,8 @@ AudioLinkCtrl(mgr, "asr", "unload_model", {0});  /* asr.onModelUnload → hub.un
 
 - 模型要求：LLM-TPU chat 格式子网（embedding/block_i/block_cache_i/lm_head
   [/greedy_head]），**无 audio 子网**（deriveAsrDims 自动按 text-only 推导）；
-- prompt：`config/meeting_summary.json` 加载顺序 `prompt_file`（外置模板文件，须含
-  `{transcript}` 占位，默认指向 `config/summary_prompt.txt`）> `prompt_template`
+- prompt：`config/summary/meeting_summary.json` 加载顺序 `prompt_file`（外置模板文件，须含
+  `{transcript}` 占位，默认指向 `config/summary/summary_prompt.txt`）> `prompt_template`
   （JSON 内联模板）> 内置默认，再经 Qwen 文本对话模板渲染 + QwenTokenizer encode；
 - **map-reduce 长转写**（参考 `application/meeting_summary` 例程）：输入预算 =
   min(MAX_INPUT_LENGTH, SEQLEN-128-max_new)；超预算时按讲话人行边界分块

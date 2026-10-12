@@ -75,34 +75,37 @@ export SDK=/path/to/sophon-sdk
 export CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++
 cd application/MixedAudioLink
 cmake -B build -DSDK="$SDK" && cmake --build build
-./build/audiolink_demo -c config/audio_link.json -d 0 -i test16k.wav
+./build/audiolink_demo -c config/audio/audio_link.json -d 0 -i test16k.wav
 ```
 
 ### 运行期资产就绪清单
 
 | 资产 | 引用位置 | 状态 | 来源 |
 |---|---|---|---|
-| `config/vocab.json` / `merges.txt` | asr 节 | ✅ 已拷入 | LLM-TPU `models/Qwen3_ASR/config/` |
-| `config/summary_vocab.json` / `summary_merges.txt` | summary 节 | ✅ 已拷入（同源重命名） | 同上 |
-| `config/summary_prompt.txt` | summary 节 prompt_file | ✅ 已入仓 | 本仓库 |
-| `config/mel_filters.npy` | asr 节（128×201 float32 npy） | ⚠️ **缺口**：两仓均无现成 npy | whisper mel_filters.npz 转换，或模型提供方随 bmodel 给出 |
-| `config/vad_mean.npy` / `vad_std.npy` | vad 节（可选 CMVN） | ✅ 已移除引用 | fsmn_vad 官方不用 CMVN；能力保留，npy 就位即可启用 |
-| `test16k.wav` | demo 输入 | ⚠️ 自备 | 16k/mono/pcm16 |
+| `config/audio/vocab.json` / `merges.txt` | asr 节 | ✅ 已拷入 | LLM-TPU `models/Qwen3_ASR/config/` |
+| `config/summary/summary_vocab.json` / `summary_merges.txt` | summary 节 | ✅ 已拷入（同源重命名） | 同上 |
+| `config/summary/summary_prompt.txt` | summary 节 prompt_file | ✅ 已入仓 | 本仓库 |
+| `config/audio/mel_filters.npy` | asr 节（128×201 float32 npy） | ✅ 已入仓 | whisper 式 mel filter（`asr_mel.h` 消费） |
+| `config/audio/am.mvn` | vad 节 `cmvn_file` | ✅ 已入仓 | funasr `speech_fsmn_vad_zh-cn-16k-common` Kaldi CMVN（8040 B） |
+| `test16k.wav` | demo 输入 | ⚠️ 自备（`scripts/download_model.sh datasets` 可取） | 16k/mono/pcm16 |
 
 ### bmodel 就绪清单（芯片无关，代码不区分芯片；现成度按芯片不同）
 
 | 模型 | BM1684X 现成度 | BM1688 现成度 | 获取方式 |
 |---|---|---|---|
-| spk（CAM++） | ✅ **现成可下载** | 🟡 需重转 | `sophon-demo/sample/CAM++/scripts/download.sh`（BM1684X） |
-| asr（qwen3_asr） | 🟡 自行转换 | 🟡 自行转换 | LLM-TPU `models/Qwen3_ASR/README.md` 转换命令（tpu-mlir，默认 BM1684X；BM1688 加 `--chip bm1688`） |
-| vad（fsmn_vad） | 🟡 自行转换 | 🟡 自行转换 | funasr `speech_fsmn_vad_zh-cn-16k-common`：torch → onnx → tpu-mlir → bmodel（流式导出需带 cache 输入输出） |
-| summary（text-only LLM） | 🟡 自行转换 | 🟡 自行转换 | LLM-TPU chat 格式转换（Qwen3 系列命令通用，同上 README 模式） |
+| spk（CAM++） | ✅ **现成可下载** | 🟡 需重转 | `sophon-demo/sample/CAM++/scripts/download.sh`（BM1684X，官方配方即 `--dynamic F32`） |
+| asr（qwen3_asr） | ✅ **现成可下载** | 🟡 需重转 | 官方 bmodel `qwen3-asr-1.7b_bf16_seq512_bm1684x_1dev_static_*.bmodel`（或 LLM-TPU `models/Qwen3_ASR/README.md` 自转） |
+| vad（fsmn_vad） | 🟡 自行转换 | 🟡 自行转换 | funasr `speech_fsmn_vad_zh-cn-16k-common`：ORT 量化 onnx → **反量化** → tpu-mlir → bmodel（见 `model_provenance.md` §2） |
+| summary（text-only LLM） | ✅ **现成可下载** | 🟡 需重转 | 官方 `sophon-demo/application/meeting_summary`：`qwen1.5-7b_int4_6k_1dev.bmodel` |
+
+> 逐条转换命令、参数与精度回归数据集：见 [`docs/model_provenance.md`](model_provenance.md)。
 
 转换指引要点：
 - asr/summary 均为 **LLM-TPU chat 格式**（embedding/block_i/block_cache_i/lm_head[/greedy_head]），
   asr 另含 audio 编码子网——子网命名与 I/O 约定见 `docs/dataflow.md`；
-- vad 为**单网静态 shape**（[80, T] fbank 输入 + cache 输入 + [T,2] 概率输出），
-  T 必须与 `vad.chunk_ms` 匹配（200ms → 20 帧）；
+- vad 为**单网静态 shape**（[1,T,400] LFR 特征输入 + 4 路 cache 输入 + [1,T,248] 概率输出），
+  **T 必须与 `vad.chunk_ms` 匹配（200ms → T=20 帧）**；源 `model_quant.onnx` 是 ORT 动态量化，
+  须先反量化为 float ONNX 再转（见 `docs/model_conversion.md` §1）；
 - **冒烟建议顺序**：spk（现成）→ vad（转换后）→ asr → summary（转换耗时最长）；
   编译验证本身不需要任何 bmodel。
 
@@ -129,14 +132,27 @@ application/MixedAudioLink/
 │   ├── links/                  # pcm / vad / feat / asr / spk / diarize / sink
 │   └── main.cpp                # C++ demo
 ├── examples/sample_c.c         # ★ 纯 C 程序调用示例（见下节）
-├── config/audio_link.json      # 音频流模块配置
-├── config/meeting_summary.json # 总结模块配置
-├── config/summary_prompt.txt   # 总结 prompt 外置模板（prompt_file 指向）
-├── docs/                       # README / API / dataflow / model_budget / status
-│                               # + commercial_roadmap / 三份评审对照报告
-├── scripts/build_soc.sh        # 板端构建脚本
+├── config/audio/               # 音频流：audio_link.json + vocab/merges/mel_filters.npy/am.mvn
+├── config/summary/             # 总结：meeting_summary.json + vocab/merges/prompt
+├── models/                     # bmodel 落位（大文件不入仓，.gitkeep + scripts 获取）
+├── docs/                       # 使用者文档：README / API / dataflow / status / model_*
+├── scripts/                    # build_soc.sh / download_model.sh / convert_vad.sh
+├── tools/                      # 对拍与回归 + 单测（随仓）
 └── CMakeLists.txt
 ```
+
+### 路径基准（双基准）
+
+运行期路径分两类，容易踩坑，务必区分：
+
+| 类别 | 键 | 解析基准 |
+|---|---|---|
+| **模型文件** | `models.*.path` | **应用根 = 启动时 CWD**（`resolveModelPath`，只做分隔符归一） |
+| **配置资产** | `vocab` / `merges` / `mel_filters` / `cmvn_file` / `prompt_file` | **启动 JSON 所在目录**（`resolveAsset`，绝对路径原样） |
+
+即：`models/qwen3_asr.bmodel` 随**应用部署位置**解析；`vocab.json` 随**配置文件位置**解析。
+所以从**应用根**直接 `./build/audiolink_demo -c config/audio/audio_link.json` 可寻址全部资产——
+`config/audio/` 下的相对引用以该目录为基准。若把 JSON 挪到别处，只需同步挪走同目录资产。
 
 ## C 程序如何调用编译好的库
 
@@ -157,7 +173,7 @@ static void on_result(const AL_RESULT *r, void *user) {
 
 int main(void) {
     /* 2. 初始化：加载 JSON 声明的全部模型 */
-    AL_HANDLE mgr = AudioLinkInit("config/audio_link.json", 0);
+    AL_HANDLE mgr = AudioLinkInit("config/audio/audio_link.json", 0);
 
     /* 3. 注册回调 */
     AL_RESULT_CB cb = on_result;
@@ -171,7 +187,7 @@ int main(void) {
     /* 5. 结束：冲刷尾段 → 取转写 → 会议总结（卸 asr 释放显存） → 清理 */
     AudioLinkCtrl(mgr, NULL, "flush", (AL_PARAM){0});
     AudioLinkCtrl(mgr, "asr", "unload_model", (AL_PARAM){0});
-    AL_HANDLE sm = MeetingSummaryInit("config/meeting_summary.json", 0);
+    AL_HANDLE sm = MeetingSummaryInit("config/summary/meeting_summary.json", 0);
     MeetingSummaryRun(sm, transcript, (AL_PARAM){out, sizeof(out)});
     MeetingSummaryDeinit(sm);
     AudioLinkCtrl(mgr, "asr", "load_model", (AL_PARAM){0});
@@ -191,7 +207,7 @@ gcc -std=c99 -O2 \
     -L build -L $SDK/lib \
     -laudiolink -lbmlib -lbmruntime -lpthread \
     -o sample_c
-./sample_c -c config/audio_link.json -s config/meeting_summary.json \
+./sample_c -c config/audio/audio_link.json -s config/summary/meeting_summary.json \
            -d 0 -i test16k.wav
 ```
 
@@ -252,7 +268,7 @@ Qwen3 系列通用，无 audio 子网），`MeetingSummaryRun(转写文本)` 生
 
 ```c
 AL_HANDLE mgr = AudioLinkInit(...);
-AL_HANDLE sm  = MeetingSummaryInit("config/meeting_summary.json", dev);  /* 同时驻留 */
+AL_HANDLE sm  = MeetingSummaryInit("config/summary/meeting_summary.json", dev);  /* 同时驻留 */
 /* ... 音频流运行，随时 MeetingSummaryRun(sm, transcript, out) ... */
 MeetingSummaryDeinit(sm);   /* 退出统一释放 */
 AudioLinkDeinit(mgr);
@@ -263,7 +279,7 @@ AudioLinkDeinit(mgr);
 
 ```c
 AudioLinkCtrl(mgr, "asr", "unload_model", {0});   /* 释放 qwen3_asr 显存 */
-AL_HANDLE sm = MeetingSummaryInit("config/meeting_summary.json", dev);
+AL_HANDLE sm = MeetingSummaryInit("config/summary/meeting_summary.json", dev);
 MeetingSummaryRun(sm, transcript, out);              /* transcript ← get_transcript */
 MeetingSummaryDeinit(sm);                            /* 释放总结模型显存 */
 AudioLinkCtrl(mgr, "asr", "load_model", {0});      /* 恢复音频流识别 */
@@ -282,14 +298,14 @@ AudioLinkCtrl(mgr, nullptr, "new_meeting", {0});   /* 开新会 */
 
 | 官方 meeting_summary 三件套 | 本模块对应 |
 |---|---|
-| `prompt.txt`（字段化纪要模板） | `config/summary_prompt.txt`（含 `{transcript}` 占位，经 `meeting_summary.json` 的 `prompt_file` 指向） |
+| `prompt.txt`（字段化纪要模板） | `config/summary/summary_prompt.txt`（含 `{transcript}` 占位，经 `meeting_summary.json` 的 `prompt_file` 指向） |
 | `meeting.txt`（转写输入文件） | 用户自备转写文本（"讲话人N：xxx\n…" 或纯文本，UTF-8） |
 | `output.txt`（总结输出文件） | `summary_output.txt`（sample_c 自动落盘） |
 
 用法（`examples/sample_c.c` 已内置 `-t` 参数支持）：
 
 ```bash
-./sample_c -s config/meeting_summary.json -t meeting.txt
+./sample_c -s config/summary/meeting_summary.json -t meeting.txt
 # -d 0 可省略（默认 dev 0）；终端打印总结，同时落盘 summary_output.txt
 ```
 
@@ -312,6 +328,8 @@ AudioLinkCtrl(mgr, NULL, "set_status_file", (AL_PARAM){"runtime_status.md", 18})
 
 - `docs/API.md` — C API 逐函数说明
 - `docs/dataflow.md` — 维度推导、前处理细节与已知的数值对齐注意事项
+- **`docs/model_provenance.md` — 模型溯源与转换手册（来源 / 逐条转换命令 / 参数 / 精度回归数据集）**
+- `docs/model_conversion.md` — 框架对模型的 I/O 需求清单（转换视角）
 - `docs/model_budget.md` — 模型预算表、显存峰值模型与选型/精度回归指引
 - `docs/code_review_report.md` — 五轴代码评审报告
 - `docs/meeting_summary_reference_report.md` — 官方 meeting_summary 例程对照研究

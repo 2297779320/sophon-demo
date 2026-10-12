@@ -3,7 +3,7 @@
 本框架**不转换、不内置任何 bmodel**：模型文件全部由外部提供
 （LLM-TPU / tpu-mlir 等转换产物），框架只消费。框架侧对模型的全部约定为：
 
-1. **多文件分离 + JSON 映射**：每个 bmodel 一个文件，`config/audio_link.json`
+1. **多文件分离 + JSON 映射**：每个 bmodel 一个文件，`config/audio/audio_link.json`
    的 `models` 节按"模型名 → path + roles 关键字"映射（角色关键字匹配子网名，
    未匹配子网仅登记暴露，见 `docs/README.md` 模型组织一节）；
 2. **chat 格式子网命名与 I/O 约定**：LLM 类模型（asr/summary）须为
@@ -12,9 +12,10 @@
    推导），详细 I/O 契约见 `docs/dataflow.md`；
 3. **全部静态 shape**：框架按静态 shape 补齐 padding 后整块拷入，不做动态 shape 适配。
 
-转换命令不在本文档范围，qwen3_asr 系列直接使用
-**LLM-TPU 仓库 `models/Qwen3_ASR` 的 README**（含各芯片量化/编译命令与
-config 产物清单）；CAM++ / fsmn_vad 走 tpu-mlir 常规 onnx→bmodel 流程。
+**模型来源、逐条转换命令、参数配置与精度回归数据集**：见
+[`docs/model_provenance.md`](model_provenance.md)（模型溯源与转换手册）。
+简单说：qwen3_asr / summary（Qwen1.5）用官方现成 bmodel，CAM++ 用官方脚本（`--dynamic`），
+fsmn_vad 走 tpu-mlir 常规 onnx→bmodel 流程（需先反量化）。
 
 ## 1. 多文件分离架构与显存策略
 
@@ -53,15 +54,14 @@ config 产物清单）；CAM++ / fsmn_vad 走 tpu-mlir 常规 onnx→bmodel 流�
 
 | 模型文件 | 角色 | 量化格式 | 显存占用 | 来源 | 许可 | 备注 |
 |---|---|---|---|---|---|---|
-| qwen3_asr_0.6b_bf16.bmodel | asr_llm + asr_audio | bf16 | 待板端实测 | LLM-TPU models/Qwen3_ASR | Apache-2.0（Qwen3 系列同源） | 0.6B 基线，精度优先 |
-| qwen3_asr_0.6b_int8.bmodel | asr_llm + asr_audio | int8 | 待板端实测 | LLM-TPU models/Qwen3_ASR | Apache-2.0 | 8GB 级以下首选 |
-| qwen3_asr_1.7b_bf16.bmodel | asr_llm + asr_audio | bf16 | 待板端实测 | LLM-TPU models/Qwen3_ASR | Apache-2.0 | 大显存板精度升级档 |
-| qwen3_asr_1.7b_int8.bmodel | asr_llm + asr_audio | int8 | 待板端实测 | LLM-TPU models/Qwen3_ASR | Apache-2.0 | 大显存板速度/显存折中 |
-| qwen3_0.5b_summary_int8.bmodel | summary（text-only LLM） | int8 | 待板端实测 | LLM-TPU Qwen3 系列转换 | Apache-2.0 | chat 格式、无 audio 子网，0.5B 级够用 |
-| campplus.bmodel | speaker | int8/bf16 | 待板端实测 | sophon-demo sample/CAM++ 同源 | 见上游 | 声纹 embedding，192 维 |
-| fsmn_vad.bmodel | vad | int8/bf16 | 待板端实测 | funasr speech_fsmn_vad_zh-cn-16k-common bmodel 化 | 见上游（Modellicense） | 流式协议与 funasr 一致 |
+| qwen3_asr_1.7b_bf16_seq512.bmodel | asr_llm + asr_audio | bf16 | 待板端实测（3.81GB） | 官方现成下载（LLM-TPU `Qwen3-ASR-1.7B`） | Apache-2.0（Qwen3 系列同源） | **当前在用**：hidden=2048/28 层/seq512 |
+| qwen3_asr_0.6b_int8.bmodel | asr_llm + asr_audio | int8 | 待板端实测 | LLM-TPU models/Qwen3_ASR | Apache-2.0 | 8GB 级以下降档候选（需重转+校准） |
+| qwen1.5-7b_int4_6k.bmodel | summary（text-only LLM） | int4 | 待板端实测（4.94GB） | 官方 meeting_summary 现成下载 | 见上游（Qwen 许可） | **当前在用**：chat 格式、无 audio 子网、SEQLEN=6144 |
+| qwen1.5-1.8b_int4_4k.bmodel | summary（text-only LLM） | int4 | 待板端实测（1.41GB） | 官方 `Qwen1_5` 目录 | 见上游 | 小显存降档候选，SEQLEN=4096 刚好达标 |
+| campplus.bmodel | speaker | F32（dynamic） | 待板端实测（32MB） | sophon-demo sample/CAM++（3D-Speaker 导出） | Apache-2.0 | 声纹 embedding，192 维 |
+| fsmn_vad.bmodel | vad | F16（静态 T=20） | 待板端实测（6.5MB） | funasr speech_fsmn_vad_zh-cn-16k-common | 见上游（Modellicense） | 流式协议与 funasr 一致 |
 
-注意：`config/audio_link.json` 的 `models` 键名（asr/spk/vad 等）可自行改名，
+注意：`config/audio/audio_link.json` 的 `models` 键名（asr/spk/vad 等）可自行改名，
 但 roles 关键字与子网名的对应关系必须成立；asr 与 summary 两个模型
 不能共用一个模型键（各自独立 hub 实例、独立 bm_handle）。
 
@@ -69,11 +69,11 @@ config 产物清单）；CAM++ / fsmn_vad 走 tpu-mlir 常规 onnx→bmodel 流�
 
 **8GB 级以下目标板**（BM1684X SoC 典型可用显存扣除系统占用后有限）：
 
-- asr 选 **0.6B int8**：识别延迟与显存的最优折中，留足 vad/spk 与切换窗口余量；
-- summary 选 **0.5B 级 int8**：纪要模板任务（结构化抽取+归纳）对模型容量
-  敏感度低，0.5B 级 int8 实测足够；转写文本经 map-reduce 分块，单次输入
-  预算受 MAX_INPUT_LENGTH 约束与模型档位无关；
-- 16GB 级及以上再考虑 asr 1.7B（int8 起步）。
+- asr 当前用 **1.7B bf16（3.81GB）**——若板端显存吃紧，降档顺序：
+  **1.7B bf16 → 0.6B int8 → 0.6B bf16**（0.6B 需自行转换，见 `model_provenance.md` §4.3）；
+- summary 当前用 **Qwen1.5-7B int4（4.94GB）**——显存吃紧可降 **1.8B int4 4k（1.41GB）**；
+  纪要模板任务（结构化抽取+归纳）对容量敏感度低，小档位实测通常够用；
+- 16GB 级及以上可保留 7B summary / 1.7B asr 原档。
 
 **通用原则**：
 

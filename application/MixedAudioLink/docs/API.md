@@ -85,7 +85,7 @@ int AudioLinkPushPcmEx(AL_HANDLE mgr, const void *pcm, int bytes,
 | `NULL` | `set_log` | `int` | 日志级别：-1=关闭，0..3=ERROR/WARN/INFO/DEBUG（作用域：仅音频流管理器日志，见 audio_link.h 注释） |
 | `NULL` | `set_log_file` | `const char*`（AL_PARAM{path,字节数}） | 日志重定向到文件（单文件超 `max_bytes` 轮转为 `.1`，保留 1 份历史）；NULL=回退 stderr |
 | `NULL` | `save_params` | — | 运行期专用配置命令修改写回启动 JSON：先写 `<cfg>.tmp` 再 `rename` 原子替换；dump 为**字典序键 + 2 空格缩进**标准 JSON（原注释/键顺序不保留，`null` 值键去除，值语义不变） |
-| `"vad"` | `set_min_silence_ms` 等 7 个专用命令 | `AL_PARAM{&double, sizeof(double)}` | 热调 VAD 参数（清单见"动态配置"节），立即生效 |
+| `"vad"` | `set_max_end_silence_ms` 等 7 个专用命令 | `AL_PARAM{&double, sizeof(double)}` | 热调 VAD 参数（清单见"动态配置"节），立即生效 |
 | `"vad"` | `get_params` | `char[512]` 出参 | 当前 VAD 参数 JSON |
 | `"asr"` | `set_language` | `const char*` | 强制语言（"Chinese" 等，NULL/空=自动） |
 | `"asr"` | `clear_history` | — | 清 KV history（`enable_history=true` 时有效） |
@@ -142,10 +142,10 @@ int AudioLinkPushPcmEx(AL_HANDLE mgr, const void *pcm, int bytes,
 
 | Link | 命令 | 值类型/范围 | 写回位置 | 说明 |
 |---|---|---|---|---|
-| vad | set_min_silence_ms | double，int ≥ 1 | `vad.min_silence_ms` | 判停静音时长 |
-| vad | set_min_speech_ms | double，int ≥ 1 | `vad.min_speech_ms` | 语音最短确认时长 |
-| vad | set_noise_thres | double [0,1] | `vad.speech_noise_thres` | funasr 噪声权重 p = p_speech − thres·p_sil |
-| vad | set_max_seg_s | double，int [1,2147] | `vad.max_seg_s` | 强制切段上限（秒） |
+| vad | set_max_end_silence_ms | double，int ≥ 1 | `vad.max_end_silence_ms` | 判停静音阈值（= funasr `max_end_silence_time`）；判停帧数 =(该值−`speech_to_sil_time_ms`)/10ms |
+| vad | set_sil_to_speech_time_ms | double，int ≥ 1 | `vad.sil_to_speech_time_ms` | 静音→语音确认时长（= funasr `sil_to_speech_time_thres`） |
+| vad | set_noise_thres | double [0,1] | `vad.speech_noise_thres` | funasr 加性噪声阈值：speech iff (1−P_sil) ≥ P_sil^ratio + thres |
+| vad | set_max_seg_s | double，int [1,2147] | `vad.max_seg_s` | 强制切段上限（秒，= funasr `max_single_segment_time`/1000） |
 | vad | set_gate_enable | double 0/1 | `vad.energy_gate.enable` | 能量前置门开关（置 1 即时武装清挂起期） |
 | vad | set_gate_rms | double，int > 0 | `vad.energy_gate.rms_thres` | 门控 RMS 阈值 |
 | vad | set_gate_hold_ms | double，int > 0 | `vad.energy_gate.hold_ms` | 门控挂起期 |
@@ -168,7 +168,7 @@ AudioLinkCtrl(mgr, NULL, "save_params", (AL_PARAM){0});   /* 原子写回启动 
 `get_params` 输出示例（vad）：
 
 ```json
-{"min_silence_ms":500,"min_speech_ms":250,"speech_noise_thres":0.5000,"max_seg_s":30,"gate_enable":0,"gate_rms_thres":300,"gate_hold_ms":600}
+{"max_end_silence_ms":800,"sil_to_speech_time_ms":150,"speech_to_sil_time_ms":150,"max_single_segment_ms":20000,"max_seg_s":20,"speech_noise_thres":0.6000,"gate_enable":0,"gate_rms_thres":300,"gate_hold_ms":600}
 ```
 
 写回兼容性说明：`gate_enable` / `enable_history` 原为 JSON bool，热调写回经数值
@@ -178,7 +178,7 @@ AudioLinkCtrl(mgr, NULL, "save_params", (AL_PARAM){0});   /* 原子写回启动 
 
 统一格式 `[YYYY-MM-DD HH:MM:SS.mmm][LEVEL][tag] msg`，级别
 `ERROR(0)/WARN(1)/INFO(2)/DEBUG(3)`，默认 INFO 输出到 stderr。来源：
-`config/audio_link.json` 的 `"log"` 节（`level`/`file`/`max_bytes`，
+`config/audio/audio_link.json` 的 `"log"` 节（`level`/`file`/`max_bytes`，
 Init 时应用）、运行期 Ctrl `set_log` / `set_log_file`。
 
 ## 回调
@@ -225,7 +225,7 @@ AL_PARAM tp{transcript, sizeof(transcript)};
 AudioLinkCtrl(mgr, "diarize", "get_transcript", tp);   /* 取转写文本集合 */
 
 AudioLinkCtrl(mgr, "asr", "unload_model", {0});        /* 释放 qwen3_asr 显存 */
-AL_HANDLE sm = MeetingSummaryInit("config/meeting_summary.json", 0);
+AL_HANDLE sm = MeetingSummaryInit("config/summary/meeting_summary.json", 0);
 AL_PARAM op{out_buf, sizeof(out_buf)};
 MeetingSummaryRun(sm, transcript, op);                   /* greedy 生成总结 */
 MeetingSummaryDeinit(sm);                                /* 释放总结模型 */
@@ -235,10 +235,10 @@ AudioLinkCtrl(mgr, NULL, "new_meeting", {0});          /* 开新会 */
 
 卸载期间：VAD/声纹/聚类照常（宿主内存），段无文本不追加转写行。
 
-prompt 模板加载顺序（`config/meeting_summary.json` 的 `summary` 节）：
+prompt 模板加载顺序（`config/summary/meeting_summary.json` 的 `summary` 节）：
 **`prompt_file`（外置模板文件，须含 `{transcript}` 占位）> `prompt_template`
 （JSON 内联模板）> 内置默认**（字段化纪要模板）。推荐用 `prompt_file`
-外置模板（默认指向 `config/summary_prompt.txt`），便于不改代码/配置热换模板。
+外置模板（默认指向 `config/summary/summary_prompt.txt`），便于不改代码/配置热换模板。
 
 ```c
 typedef void (*AL_PARTIAL_CB)(const char *partial_text, void *user);
@@ -248,7 +248,7 @@ ASR 逐词增量文本（打字机效果用），在任务线程上下文调用�
 ## 典型时序
 
 ```c
-AL_HANDLE m = AudioLinkInit("config/audio_link.json", 0);
+AL_HANDLE m = AudioLinkInit("config/audio/audio_link.json", 0);
 struct { AL_RESULT_CB cb; void *user; } cb = {onResult, NULL};
 AL_PARAM p{&cb, sizeof(cb)};
 AudioLinkCtrl(m, "sink", "set_result_cb", p);

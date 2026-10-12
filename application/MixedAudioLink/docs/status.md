@@ -15,14 +15,14 @@
 | 按模型卸载/重载 | ✅ 完成 | 卸载闸门 + 2s 空闲等待，v1 仅 asr（显存换入换出，会议总结时序） |
 | 说话人归属（diarize） | ✅ 完成 | 在线质心聚类"讲话人N：xxx"、转写缓冲、`get_transcript`/`new_meeting` |
 | MeetingSummary 总结模块 | ✅ 完成 | 独立模块（非 link 节点）、text-only LLM、map-reduce 长转写、流式回调 |
-| 总结模块三件套外置 | ✅ 完成 | `prompt_file` 外置模板（config/summary_prompt.txt，自动剥离 UTF-8 BOM）+ `MeetingSummaryRunFile` 文件输入 + sample 落盘 `summary_output.txt`；独立总结模式 `-t` 失败返回码可感知 |
+| 总结模块三件套外置 | ✅ 完成 | `prompt_file` 外置模板（config/summary/summary_prompt.txt，自动剥离 UTF-8 BOM）+ `MeetingSummaryRunFile` 文件输入 + sample 落盘 `summary_output.txt`；独立总结模式 `-t` 失败返回码可感知 |
 | 日志系统 | ✅ 完成 | 四级 + 文件重定向/轮转 + 线程安全（`al_log.h`），Ctrl 热更 |
 | 版本 API | ✅ 完成 | `AudioLinkGetVersion()`，CMake 注入 git hash/构建日期 |
 | 退出状态快照 | ✅ 完成 | `Ctrl "set_status_file"`：Stop 退出前（链路存活时）自动写 Markdown 运行状态（版本/时长/段数/丢弃/转写统计） |
 | 静音处理 | ✅ 完成 | 纯静音零下游开销；`max_seg_s` 强制切段（防连续噪音内存无界）；能量前置门（`energy_gate`，默认关闭）静音期跳过 VAD 推理 |
 | 纯 C 接入验证 | ✅ 完成 | `examples/sample_c.c`（纯 C99，仅新增不改已有 ABI） |
 | 内置重采样 | ✅ 完成 | `al_resample.h` 多相 FIR（48k/44.1k/8k→16k + 多声道混缩）；新 API `AudioLinkPushPcmEx`；16k 直推零开销路径逐字节兼容；格式首推锁定 |
-| 链路级自愈 | ✅ 完成 | VAD launch 失败 resetCache+softReset 重试（说话中先保全已累积段）；ASR 失败 clear_history 重试；3 连败升级上报；`get_stats` 含 self_heal_count |
+| 链路级自愈 | ✅ 完成 | VAD launch 失败 `resetCache` 后原地重试一次（只复位设备 cache，不动端点状态机 / 滚动缓冲——音频已在缓冲中，段连续性不受影响）；ASR 失败 clear_history 重试；3 连败升级上报；`get_stats` 含 self_heal_count |
 | 配置启动校验强化 | ✅ 完成 | `ValidateConfig` 两段式（必需键/数值范围/文件存在 + roles 命中）；`strict` 开关（默认宽松）；报错含完整 JSON 路径 |
 | 动态配置接口 | ✅ 完成 | 各 Link 专用 Ctrl 命令（13 个：vad 7 / asr 3 / diarize 2 / pcm 1，数值统一 double 协议）+ get_params + save_params 持久化，立即生效、tmp+rename 原子写回 |
 | KV 免拷贝（io_alone） | ✅ 完成 | init 双重检测（addr_mode==1 + block_cache_0 KV 输入/输出地址运行时比对）；io_alone=true：prefill KV 原地写（免 2×NUM_LAYERS d2d）+ decode 偏移原地写；false：BASIC 回退逐层 d2d（⚠️ 双分支行为待板端实测） |
