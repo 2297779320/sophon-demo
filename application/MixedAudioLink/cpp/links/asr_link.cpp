@@ -316,10 +316,17 @@ int CAsrLink::forwardAudio(const float *chunks, int n_times, const std::vector<i
     size_t in_bytes = bm_mem_get_device_size(in_mem);
     size_t out_bytes = bm_mem_get_device_size(out_mem);
 
+    /* host 步长按 mel 实际块大小自算，不再由设备内存大小反推：
+     * 两者在 create() 已校验相等（故无越界风险），但"host 缓冲怎么走"应取决于
+     * "mel 有多大"，而不是"设备内存有多大" —— 否则将来一旦出现 padding
+     * 或维度规则再变，会重新引入越界读。此处再兜一道运行期校验。 */
+    const size_t per_chunk = (size_t)d.AUDIO_MEL_BINS * (size_t)d.AUDIO_LENGTH;
+    if (per_chunk == 0 || per_chunk * sizeof(float) != in_bytes) return E_AL_NET_NOT_MATCH;
+
     std::vector<bm_tensor_t> ins(net_audio->input_num), outs(net_audio->output_num);
     for (int i = 0; i < n_times; i++) {
         if (bm_memcpy_s2d_partial(h, in_mem,
-                                  (void *)(chunks + (size_t)i * in_bytes / sizeof(float)),
+                                  (void *)(chunks + (size_t)i * per_chunk),
                                   in_bytes) != BM_SUCCESS)
             return E_AL_LAUNCH_FAIL;
         for (int k = 0; k < net_audio->input_num; k++)
