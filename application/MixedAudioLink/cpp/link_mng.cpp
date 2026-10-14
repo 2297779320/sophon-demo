@@ -329,12 +329,48 @@ int CLinkMng::bind(const std::string &src, const std::string &dst) {
 int CLinkMng::start() {
     if (m_running.load()) return E_AL_OK;
     m_start_time = std::chrono::steady_clock::now();   /* 运行时长基准（退出快照用） */
+
+    /* 逐个检查返回码：任一 link 启动失败都要回滚已启动的，
+     * 否则会进入"工作线程已跑、链路半就绪"的状态，故障被静默吞掉。 */
+    std::vector<std::string> started;
+    int rc = E_AL_OK;
     {
         std::lock_guard<std::mutex> lk(m_links_mtx);
-        for (auto &kv : m_links) kv.second->start();
+        for (auto &kv : m_links) {
+            int r = kv.second->start();
+            if (r != E_AL_OK) {
+                rc = r;
+                setLastError("link '" + kv.first + "' start failed, rc=" + std::to_string(r));
+                logErr("link '" + kv.first + "' start failed, rc=" + std::to_string(r));
+                break;
+            }
+            started.push_back(kv.first);
+        }
     }
+    if (rc != E_AL_OK) {
+        rollbackStarted(started);
+        return rc;   /* m_running 保持 false：未启动成功 */
+    }
+
     m_running = true;
-    return startWorkers();   /* 工作线程启动（子类钩子；失败时 m_running 已置位由调用方 stop 兜底） */
+    rc = startWorkers();   /* 工作线程启动（子类钩子） */
+    if (rc != E_AL_OK) {
+        setLastError("startWorkers failed, rc=" + std::to_string(rc));
+        logErr("startWorkers failed, rc=" + std::to_string(rc));
+        rollbackStarted(started);
+        m_running = false;
+        return rc;
+    }
+    return E_AL_OK;
+}
+
+/** start() 失败回滚：逆序停掉已启动的 link（不含失败者本身，它没起来） */
+void CLinkMng::rollbackStarted(const std::vector<std::string> &started) {
+    std::lock_guard<std::mutex> lk(m_links_mtx);
+    for (auto it = started.rbegin(); it != started.rend(); ++it) {
+        auto kv = m_links.find(*it);
+        if (kv != m_links.end()) kv->second->stop();
+    }
 }
 
 int CLinkMng::stop() {

@@ -179,6 +179,8 @@ protected:
     /** start 的线程启动处 / stop 的线程 teardown 处（基座默认不起任何线程） */
     virtual int startWorkers();
     virtual void stopWorkers();
+    /** start() 失败回滚：逆序停掉 started 里已启动成功的 link（不持 m_links_mtx 调用） */
+    void rollbackStarted(const std::vector<std::string> &started);
     /** ctrl 工作流命令转发：管理器级通用命令全不匹配时，及 Link 级
      *  unload_model/load_model 命令字命中时调用（未识别返回 E_AL_PARAM_ERR） */
     virtual int onCtrl(const std::string &name, const std::string &cmd, AL_PARAM param);
