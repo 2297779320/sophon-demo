@@ -15,9 +15,27 @@
 | `spk_feat_dump.cpp` / `spk_ref_dump.cpp` + `compare_spk.py` | CAM++ 声纹前端对拍（本仓 vs 官方前端源码） |
 | `path_resolve_test.cpp` | 路径双基准解析自测 |
 | `asr_mel_contract_test.cpp` | ASR mel 输出契约回归（每块字节数 == `audio` 子网设备输入字节数；含 `dims[1]` 越界反例护栏 + mel 滤波器组对拍） |
+| `al_out_test.cpp` | 出参缓冲写入（`cpp/al_out.h`）行为与 ABI 回归：截断必须返回 `E_AL_BUFFER_TOO_SMALL`、边界 `size==len+1`、参数错误与缓冲过小须区分、截断不越界 |
 | `dequant_onnx.py` | ORT 量化 ONNX → float ONNX（图手术反量化） |
 | `dfss_fetch.py` | 官方源 SFTP 直连下载器（`dfss` 测速失效时的兜底） |
 | `vad_ref.py` / `vad_decode_check.py` | VAD 后处理参考实现 / 解码校验 |
+
+## 出参写入（`al_out.h`）行为与 ABI 回归
+
+```bash
+g++ -O2 -std=c++17 -I cpp tools/al_out_test.cpp -o /tmp/al_out_test
+/tmp/al_out_test
+# 期望：33 passed, 0 failed -> PASS（退出码 0）
+```
+
+锁死"截断不得静默返回成功"这条契约 —— 12 处出参写入全部改走
+`alCopyOut`/`alFormatOut` 后，若判定边界写错（典型误写 `n > size`），
+调用方会重新拿到被截断的 JSON/摘要却收到 `E_AL_OK`。
+
+覆盖：ABI 错误码不碰撞、`size==len+1` 恰好够、`size==len` 必须 TOO_SMALL、
+截断后仍 NUL 结尾且 `size` 之后字节未被污染（无越界写）、
+`data==NULL`/`size<=0` 走 `E_AL_PARAM_ERR`（与"缓冲给小了"区分）、
+`alOutNeedBytes` 与写入边界一致、含内嵌 NUL 与 UTF-8 的语义。
 
 ## VAD 与前端回归
 
