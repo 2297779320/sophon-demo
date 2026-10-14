@@ -53,7 +53,8 @@ typedef enum {
     E_AL_TIMEOUT,           /* 对象池满（背压语义，非错误） */
     E_AL_BUSY,              /* 资源忙 */
     E_AL_INTERNAL_ERR,      /* 内部错误 */
-    E_AL_BUFFER_TOO_SMALL   /* 出参缓冲不足（内容被截断，未写入完整结果） */
+    E_AL_BUFFER_TOO_SMALL,  /* 出参缓冲不足（内容被截断，未写入完整结果） */
+    E_AL_MODEL_UNLOADED     /* 目标模型当前不可用：已卸载/被重载（推理前有效性校验失败） */
 } E_AL_STATE;
 
 /** Link 类型常量（AudioLinkCreate 的 type 参数） */

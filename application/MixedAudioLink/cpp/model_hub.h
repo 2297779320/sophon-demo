@@ -15,6 +15,9 @@
 //     => 推理线程与卸载/重载必须互斥：上层（CAudioLinkMng）在 unload/load
 //        前等待任务线程空闲，并在卸载后让 Link 走 onModelUnload 联动。
 //        本锁只保证"不会因并发访问容器本身而崩"，不替代这层协议。
+//   * 推理侧另有**防御性校验**：CBaseLink::acquireModel() 在每次推理前取
+//     modelRef() + 校验 loaded/bmrt/gen，失效即放弃本次推理（E_AL_MODEL_UNLOADED）。
+//     它把"误用悬垂指针"降级为"返回错误"，是上层的兜底而非替代。
 //
 //===----------------------------------------------------------------------===//
 #ifndef AL_MODEL_HUB_H
@@ -65,6 +68,10 @@ struct SModel {
     std::map<std::string, std::string> role_of_net;   /* 子网名 → 角色 */
     std::set<std::string> disabled;          /* Ctrl enable/disable 管理 */
     bool loaded = false;
+    /** 加载代次：每次成功 loadOne 递增（unload 不变）。调用方（Link）在 create 时
+     *  记下 gen，推理前比对 —— 不一致说明模型已被重载，缓存的 net_info/mems
+     *  指针已随旧 bmrt 销毁而失效，必须停止使用（Link 侧重新绑定）。 */
+    uint32_t gen = 0;
 };
 
 /**
@@ -149,6 +156,8 @@ private:
     /* 保护 m_models / m_asr_dims：读接口共享锁、写接口独占锁 */
     mutable std::shared_mutex m_mtx;
     std::map<std::string, std::shared_ptr<SModel>> m_models;
+    /* 加载代次发号器：仅在持独占锁的 loadOne 内 ++（SModel::gen 的来源） */
+    uint32_t m_gen = 0;
     AsrDims m_asr_dims;
     std::string m_last_err;
 

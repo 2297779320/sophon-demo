@@ -178,6 +178,10 @@ std::string CModelHub::loadOne(const std::string &name, const JsonValue *cfg) {
         }
     }
     m->loaded = true;
+    /* 代次发号：必须在替换 map 之前 —— 之后旧 SModel 可能随引用计数归零而析构，
+     * 调用方据此判断自己缓存的 net_info/mems 指针是否已随旧 bmrt 失效。
+     * （loadOne 全程在 init/loadModel 持有的独占锁下执行，++ 无需额外加锁） */
+    m->gen = ++m_gen;
     m_models[name] = m;
     /* 角色映射结果入日志（roles 未命中可在此直接发现） */
     std::string role_str;

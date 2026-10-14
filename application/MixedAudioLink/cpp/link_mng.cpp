@@ -41,6 +41,15 @@ int CBaseLink::pullSource(FramePtr &out) {
 FramePtr CBaseLink::acquireFrame() { return m_mng->frameAcquire(); }
 const JsonValue *CBaseLink::cfg() const { return m_mng->rootCfg(); }
 
+std::shared_ptr<SModel> CBaseLink::acquireModel(const std::string &model, uint32_t gen) {
+    /* modelRef 在锁内拷贝 shared_ptr：即便随后另一线程 loadModel 替换了 map 里的
+     * SModel（旧对象析构），手中这份仍可安全读取其成员。 */
+    auto m = m_mng->hub().modelRef(model);
+    if (!m || !m->loaded || !m->bmrt) return nullptr;   /* 已卸载：bmrt 已 destroy */
+    if (gen != 0 && m->gen != gen) return nullptr;      /* 已重载：旧 net_info/mems 失效 */
+    return m;
+}
+
 int CBaseLink::ctrl(const std::string &cmd, AL_PARAM param) {
     (void)cmd;
     (void)param;

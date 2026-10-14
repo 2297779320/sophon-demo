@@ -107,6 +107,7 @@ private:
     /* 子网 */
     std::string m_model, m_net;
     const bm_net_info_t *m_info = nullptr;
+    uint32_t m_gen = 0;                /* create 时模型的加载代次（见 SModel::gen） */
     int m_feat_in_idx = 0;        /* 特征输入下标 */
     int m_prob_out_idx = 0;       /* 概率输出下标 */
     std::vector<int> m_cache_in;  /* cache 输入下标（即其余输入） */

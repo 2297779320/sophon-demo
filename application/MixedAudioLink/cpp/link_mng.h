@@ -76,6 +76,13 @@ protected:
     FramePtr acquireFrame();
     /* 上游拉一帧 */
     int pullSource(FramePtr &out);
+    /** 取模型的可推理引用（**防悬垂**：unload/load 会让裸指针与 net_info 失效）。
+     *  非空 ⇒ 该模型此刻 loaded 且 bmrt 有效，且代次与 gen 一致（gen=0 表示不校验代次）；
+     *  空   ⇒ 已卸载或已被重载（缓存的 net_info/mems 指针已失效），调用方须放弃本次推理
+     *        并返回 E_AL_MODEL_UNLOADED，不得再触碰 m_info / 设备 mem。
+     *  注意：shared_ptr 只保证 SModel 对象存活，**不保证 bmrt 仍有效**，故这里的
+     *        loaded/bmrt/gen 三连校验是必需的，不能只判指针非空。 */
+    std::shared_ptr<SModel> acquireModel(const std::string &model, uint32_t gen);
     CLinkMng *mng() { return m_mng; }
     const JsonValue *cfg() const;
 

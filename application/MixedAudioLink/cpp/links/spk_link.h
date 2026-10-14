@@ -29,6 +29,9 @@ public:
         if (m_net.empty()) m_net = hub.modelRef(m_model)->net_names[0]; /* 单网模型取第一个 */
         m_info = hub.netInfo(m_model, m_net);
         if (!m_info) return E_AL_NET_NOT_MATCH;
+        /* 记下加载代次：后续推理前比对，模型被 unload/load 时缓存的 m_info 即失效 */
+        auto mm = hub.modelRef(m_model);
+        m_gen = mm ? mm->gen : 0;
         /* spk.emb_dim 与子网输出维度校验（不符仅告警，输出仍按模型实际维度取） */
         auto spk_cfg = mng()->section("spk");
         int emb_dim = spk_cfg ? (int)spk_cfg->getNum("emb_dim", 0) : 0;
@@ -50,8 +53,15 @@ public:
         if (rows <= 0 || cols <= 0 || fbank.size() != (size_t)rows * cols)
             return E_AL_PARAM_ERR;
 
-        bm_handle_t h = (bm_handle_t)bmrt_get_bm_handle(mng()->hub().model(m_model)->bmrt);
-        void *bmrt = mng()->hub().model(m_model)->bmrt;
+        /* 取共享引用而非裸指针：模型被 unload/load 时旧 bmrt 与 m_info 一并失效，
+         * 此处校验失败即放弃本次推理（不再触碰 m_info / 设备 mem） */
+        auto mp = acquireModel(m_model, m_gen);
+        if (!mp) {
+            mng()->logErr("spk model unusable (unloaded or reloaded): " + m_model);
+            return E_AL_MODEL_UNLOADED;
+        }
+        void *bmrt = mp->bmrt;
+        bm_handle_t h = (bm_handle_t)bmrt_get_bm_handle(bmrt);
 
         /* 输入 shape：dynamic=实际 rows；静态=net_info dims（补零/截断对齐） */
         std::vector<float> feat_in(fbank);
@@ -106,6 +116,7 @@ public:
 private:
     std::string m_model, m_net;
     const bm_net_info_t *m_info = nullptr;
+    uint32_t m_gen = 0;         /* create 时模型的加载代次（见 SModel::gen） */
     int m_max_batch = 1;
     int m_last_rows = 0, m_last_cols = 0;
 };

@@ -305,6 +305,14 @@ int CAsrLink::forwardAudio(const float *chunks, int n_times, const std::vector<i
     CModelHub &hub = mng()->hub();
     const bm_net_info_t *net_audio = hub.netInfo(m_model, m_audio_net);
     if (!net_audio || !m_llm.ready()) return E_AL_NET_NOT_MATCH;
+    /* 有效性校验（不校验代次：asr 重载由 onModelLoad 重新绑定子网与 dev_buffer，
+     * net_audio 也是本次现取）；挡住"模型已卸载却仍被调用"的悬垂访问 */
+    auto mp = acquireModel(m_model, 0);
+    if (!mp) {
+        mng()->logErr("asr model unusable (unloaded): " + m_model);
+        return E_AL_MODEL_UNLOADED;
+    }
+    void *bmrt = mp->bmrt;
     bm_handle_t h = m_llm.handle();
     const AsrDims &d = m_llm.dims();
 
@@ -337,7 +345,7 @@ int CAsrLink::forwardAudio(const float *chunks, int n_times, const std::vector<i
             bmrt_tensor_with_device(&outs[k], net_audio->stages[0].output_mems[k],
                                     net_audio->output_dtypes[k],
                                     net_audio->stages[0].output_shapes[k]);
-        if (!bmrt_launch_tensor_ex(hub.modelRef(m_model)->bmrt, net_audio->name, ins.data(),
+        if (!bmrt_launch_tensor_ex(bmrt, net_audio->name, ins.data(),
                                    net_audio->input_num, outs.data(), net_audio->output_num,
                                    true, false))
             return E_AL_LAUNCH_FAIL;

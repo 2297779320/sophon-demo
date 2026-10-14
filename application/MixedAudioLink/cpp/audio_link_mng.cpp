@@ -245,6 +245,15 @@ int CAudioLinkMng::onCtrl(const std::string &name, const std::string &cmd, AL_PA
     }
 
     /* 模型真实卸载/重载（显存受限：总结时卸 asr，总结后重载；v1 仅支持 asr）。
+     * 为什么只对 asr 开门：
+     *   - asr 的唯一使用者是**任务线程**（段级、串行），可用 m_task_pause +
+     *     队列空闲轮询封死窗口，且 asr 有 onModelUnload/onModelLoad 可重新绑定
+     *     子网与 dev_buffer；
+     *   - vad/spk 由**流式工作线程**高频访问（vad 每 chunk 推理一次），卸载要么
+     *     join 该线程（打断实时流、丢失流状态），要么依赖推理侧的防御性校验把
+     *     误用降级为 E_AL_MODEL_UNLOADED（已由 acquireModel 提供），两者都不如
+     *     "常驻不卸"划算 —— 且 vad/spk 合计不足 40MB，不是显存瓶颈。
+     * 故此处显式拒绝非 asr：宁可报错，也不让常驻模型进入半卸载状态。
      * 基座识别命令字后转发至此，n 已确认命中已注册 Link */
     if (c == "unload_model" || c == "load_model") {
         if (n != strAsrModel || n.empty()) {

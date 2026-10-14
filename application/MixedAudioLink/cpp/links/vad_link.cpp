@@ -74,6 +74,9 @@ int CVadLink::create(const JsonValue *cfg, AL_PARAM param) {
     m_info = hub.netInfo(m_model, m_net);
     if (!m_info || m_info->input_num < 1 || m_info->output_num < 1)
         return E_AL_NET_NOT_MATCH;
+    /* 记下加载代次：后续推理前比对，模型被 unload/load 时缓存的 m_info 即失效 */
+    auto mm = hub.modelRef(m_model);
+    m_gen = mm ? mm->gen : 0;
 
     m_feat_in_idx = 0;
     m_prob_out_idx = 0;
@@ -225,7 +228,10 @@ void CVadLink::deinitMem() {
 
 void CVadLink::resetCache() {
     if (!m_info) return;
-    bm_handle_t h = (bm_handle_t)bmrt_get_bm_handle(mng()->hub().model(m_model)->bmrt);
+    /* 共享引用 + 有效性校验：模型已卸载/被重载时直接放弃（不再触碰 m_info mems） */
+    auto mp = acquireModel(m_model, m_gen);
+    if (!mp) return;
+    bm_handle_t h = (bm_handle_t)bmrt_get_bm_handle(mp->bmrt);
     int v = 0;
     for (int idx : m_cache_in)
         bm_memset_device_ext(h, &v, 1, m_info->stages[0].input_mems[idx]);
@@ -434,8 +440,13 @@ int CVadLink::finishFlush() {
 }
 
 int CVadLink::launchT(const std::vector<float> &feat, std::vector<float> &probs) {
-    bm_handle_t h = (bm_handle_t)bmrt_get_bm_handle(mng()->hub().model(m_model)->bmrt);
-    void *bmrt = mng()->hub().model(m_model)->bmrt;
+    /* 共享引用 + 有效性校验：VAD 由工作线程高频调用，若模型已被 unload/load，
+     * 旧的 bmrt 与 m_info 均已失效 —— 这里放弃本次推理（丢弃该组特征），
+     * 而不是带着悬垂指针去 launch。 */
+    auto mp = acquireModel(m_model, m_gen);
+    if (!mp || !m_info) return E_AL_MODEL_UNLOADED;
+    void *bmrt = mp->bmrt;
+    bm_handle_t h = (bm_handle_t)bmrt_get_bm_handle(bmrt);
 
     const int T = m_T;
     if (T <= 0) return E_AL_NET_NOT_MATCH;
