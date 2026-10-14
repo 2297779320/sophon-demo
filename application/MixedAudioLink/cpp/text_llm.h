@@ -31,7 +31,7 @@ public:
 
     /** 子网发现 + KV/dev_buffer 分配（模型须已由 hub 加载） */
     int init(CModelHub &hub, const std::string &model_name) {
-        SModel *m = hub.model(model_name);
+        auto m = hub.modelRef(model_name);   /* shared_ptr：跨并发 load/unload 不会悬垂 */
         if (!m || !m->bmrt) return E_AL_NET_NOT_MATCH;
         m_model = model_name;
         m_bmrt = m->bmrt;

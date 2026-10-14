@@ -22,6 +22,7 @@ namespace al {
 CModelHub::~CModelHub() { deinit(); }
 
 std::string CModelHub::init(const JsonValue *models_cfg, int dev_id) {
+    std::unique_lock<std::shared_mutex> lk(m_mtx);   /* init 期独占（正常为单线程，防误用） */
     /* 所有模型均为独立 bmodel 文件：每个键 → bmrt_create + bmrt_load_bmodel，
      * 一个独立 bmrt 上下文；无融合模型（单文件多子网混合 bmodel 不支持）。
      * 显存占用 = Σ(各模型权重 + KV cache)，可经 unloadModel/loadModel 换入换出 */
@@ -37,12 +38,26 @@ std::string CModelHub::init(const JsonValue *models_cfg, int dev_id) {
 
     for (auto &kv : models_cfg->obj) {
         std::string err = loadOne(kv.first, kv.second.get());
-        if (!err.empty()) return err;
+        if (!err.empty()) {
+            /* 部分加载失败必须立即回滚：否则已成功的 bmodel（asr 可达 3.81GB）
+             * 会一直占着显存与 bmrt 上下文，调用方重试时 bm_dev_request 再次申请，
+             * 表现为"换个模型就起不来"的假故障。此处已持独占锁，走无锁版本。 */
+            AL_LOG_E("model_hub", "init failed on '%s': %s -> rollback all loaded models",
+                     kv.first.c_str(), err.c_str());
+            deinitLocked();
+            return err;
+        }
     }
     return "";
 }
 
 void CModelHub::deinit() {
+    std::unique_lock<std::shared_mutex> lk(m_mtx);
+    deinitLocked();
+}
+
+/** 无锁版本：调用方必须已持 m_mtx（shared_mutex 不可重入） */
+void CModelHub::deinitLocked() {
     for (auto &kv : m_models) {
         if (kv.second->bmrt) bmrt_destroy(kv.second->bmrt);
         kv.second->bmrt = nullptr;
@@ -54,9 +69,43 @@ void CModelHub::deinit() {
     }
 }
 
-SModel *CModelHub::model(const std::string &name) {
+/*---------- 无锁内部实现（调用方必须已持 m_mtx，shared 或 unique 均可） ----------*/
+
+SModel *CModelHub::modelLocked(const std::string &name) const {
     auto it = m_models.find(name);
     return it == m_models.end() ? nullptr : it->second.get();
+}
+
+const bm_net_info_t *CModelHub::netInfoLocked(const std::string &model, const std::string &net) const {
+    auto it = m_models.find(model);
+    if (it == m_models.end()) return nullptr;
+    auto n = it->second->nets.find(net);
+    return n == it->second->nets.end() ? nullptr : n->second;
+}
+
+std::string CModelHub::netByRoleLocked(const std::string &model, const std::string &role) const {
+    auto it = m_models.find(model);
+    if (it == m_models.end()) return "";
+    for (auto &n : it->second->net_names) {
+        auto r = it->second->role_of_net.find(n);
+        if (r != it->second->role_of_net.end() && r->second == role) return n;
+    }
+    return "";
+}
+
+/*---------------------------- 带锁公开接口 ----------------------------*/
+
+SModel *CModelHub::model(const std::string &name) {
+    std::shared_lock<std::shared_mutex> lk(m_mtx);
+    return modelLocked(name);
+}
+
+std::shared_ptr<SModel> CModelHub::modelRef(const std::string &name) const {
+    std::shared_lock<std::shared_mutex> lk(m_mtx);
+    auto it = m_models.find(name);
+    /* 返回 shared_ptr 拷贝：即使随后另一线程 loadModel 替换了 map 里的对象，
+     * 调用方手上的这份仍有效（对象存活由引用计数保证）。 */
+    return it == m_models.end() ? nullptr : it->second;
 }
 
 bool CModelHub::matchKeywords(const std::string &net_name, const std::string &keywords) {
@@ -147,7 +196,8 @@ std::string CModelHub::loadOne(const std::string &name, const JsonValue *cfg) {
 /*=================== 按模型卸载/重载（显存受限场景） ====================*/
 
 int CModelHub::unloadModel(const std::string &name, std::string &err) {
-    auto m = model(name);
+    std::unique_lock<std::shared_mutex> lk(m_mtx);
+    auto m = modelLocked(name);
     if (!m) { err = "model not found: " + name; return E_AL_LINK_NOT_FOUND; }
     if (!m->loaded) { err = "model already unloaded: " + name; return E_AL_PARAM_ERR; }
     if (m->bmrt) {
@@ -162,34 +212,36 @@ int CModelHub::unloadModel(const std::string &name, std::string &err) {
 }
 
 int CModelHub::loadModel(const std::string &name, std::string &err) {
-    auto m = model(name);
+    std::unique_lock<std::shared_mutex> lk(m_mtx);
+    auto m = modelLocked(name);
     if (!m) { err = "model not found: " + name; return E_AL_LINK_NOT_FOUND; }
     if (m->loaded) return E_AL_OK;
-    /* 角色映射增量更新：清除旧 SModel，按原 JSON 配置重建 */
-    std::string e = loadOne(name, m->cfg);
+    /* 关键：loadOne 会用新 SModel 替换 map 里的 shared_ptr，旧对象可能随之析构，
+     * 故必须在重建之前把要延续的状态拷出来 —— 否则下面的 m 已是悬垂指针（UAF）。 */
+    std::set<std::string> disabled = m->disabled;
+    const JsonValue *cfg = m->cfg;
+    /* 角色映射增量更新：按原 JSON 配置重建 */
+    std::string e = loadOne(name, cfg);
     if (!e.empty()) { err = e; return E_AL_MODEL_LOAD_FAIL; }
     /* 恢复 disabled 集合（loadOne 重建了 SModel） */
-    auto nm = model(name);
-    nm->disabled = m->disabled;
+    auto nm = modelLocked(name);
+    if (nm) nm->disabled = disabled;
     return E_AL_OK;
 }
 
 bool CModelHub::modelLoaded(const std::string &name) const {
+    std::shared_lock<std::shared_mutex> lk(m_mtx);
     auto it = m_models.find(name);
     return it != m_models.end() && it->second->loaded;
 }
 
 std::string CModelHub::netByRole(const std::string &model, const std::string &role) const {
-    auto it = m_models.find(model);
-    if (it == m_models.end()) return "";
-    for (auto &n : it->second->net_names) {
-        auto r = it->second->role_of_net.find(n);
-        if (r != it->second->role_of_net.end() && r->second == role) return n;
-    }
-    return "";
+    std::shared_lock<std::shared_mutex> lk(m_mtx);
+    return netByRoleLocked(model, role);
 }
 
 std::string CModelHub::modelByRole(const std::string &role) const {
+    std::shared_lock<std::shared_mutex> lk(m_mtx);
     if (role.empty()) return "";
     /* m_models 为 std::map（按键名有序），多模型命中同一角色时结果稳定 */
     for (auto &kv : m_models) {
@@ -201,20 +253,20 @@ std::string CModelHub::modelByRole(const std::string &role) const {
 }
 
 const bm_net_info_t *CModelHub::netInfo(const std::string &model, const std::string &net) const {
-    auto it = m_models.find(model);
-    if (it == m_models.end()) return nullptr;
-    auto n = it->second->nets.find(net);
-    return n == it->second->nets.end() ? nullptr : n->second;
+    std::shared_lock<std::shared_mutex> lk(m_mtx);
+    return netInfoLocked(model, net);
 }
 
 void CModelHub::setNetEnabled(const std::string &model, const std::string &net, bool enable) {
-    auto m = this->model(model);
+    std::unique_lock<std::shared_mutex> lk(m_mtx);
+    auto m = modelLocked(model);
     if (!m) return;
     if (enable) m->disabled.erase(net);
     else m->disabled.insert(net);
 }
 
 std::string CModelHub::dumpNets() const {
+    std::shared_lock<std::shared_mutex> lk(m_mtx);
     std::ostringstream oss;
     oss << "{\"models\":[";
     bool first_m = true;
@@ -240,13 +292,16 @@ std::string CModelHub::dumpNets() const {
 /*=================== qwen3_asr 维度推导（chat.cpp init_by_names 移植） ===================*/
 
 std::string CModelHub::deriveAsrDims(const std::string &model, const JsonValue *dims_cfg) {
-    auto m = this->model(model);
+    /* 全程独占锁：既写 m_asr_dims，也要保证读取的 net_info 指针在推导期间不被
+     * 并发 unload/load 抽走（内部一律走 *Locked 变体，shared_mutex 不可重入） */
+    std::unique_lock<std::shared_mutex> lk(m_mtx);
+    auto m = modelLocked(model);
     if (!m) return "model not found: " + model;
 
     AsrDims d;
-    const bm_net_info_t *net_embed = netInfo(model, "embedding");
-    const bm_net_info_t *net_embed_cache = netInfo(model, "embedding_cache");
-    const bm_net_info_t *net_lm = netInfo(model, "lm_head");
+    const bm_net_info_t *net_embed = netInfoLocked(model, "embedding");
+    const bm_net_info_t *net_embed_cache = netInfoLocked(model, "embedding_cache");
+    const bm_net_info_t *net_lm = netInfoLocked(model, "lm_head");
     if (!net_embed || !net_embed_cache || !net_lm)
         return "asr model missing embedding/embedding_cache/lm_head nets";
 
@@ -254,7 +309,7 @@ std::string CModelHub::deriveAsrDims(const std::string &model, const JsonValue *
     auto exist = [&](const std::string &n) { return m->nets.count(n) > 0; };
 
     /* audio 子网可选：text-only LLM（总结模型）无 audio */
-    const bm_net_info_t *net_audio = netInfo(model, netByRole(model, "asr_audio").empty() ? "audio" : netByRole(model, "asr_audio"));
+    const bm_net_info_t *net_audio = netInfoLocked(model, netByRoleLocked(model, "asr_audio").empty() ? "audio" : netByRoleLocked(model, "asr_audio"));
     bool has_audio = net_audio != nullptr;
     int fixed_nets = has_audio ? 4 : 3; /* embed, embedding_cache, [audio], lm_head */
 
@@ -272,7 +327,7 @@ std::string CModelHub::deriveAsrDims(const std::string &model, const JsonValue *
     d.lmhead_with_topk = net_lm->stages[0].output_shapes[0].dims[1] == 1;
     d.MAX_INPUT_LENGTH = net_embed->stages[0].input_shapes[0].dims[1];
     d.HIDDEN_SIZE = net_lm->stages[0].input_shapes[0].dims[1];
-    const bm_net_info_t *bc0 = netInfo(model, "block_cache_0");
+    const bm_net_info_t *bc0 = netInfoLocked(model, "block_cache_0");
     d.SEQLEN = bc0 ? bc0->stages[0].input_shapes[3].dims[1] : 0;
     if (has_audio) {
         /* 业务维度一律取**末尾两维**，勿写死 dims[1]/dims[3]：audio 子网输入带
@@ -293,7 +348,7 @@ std::string CModelHub::deriveAsrDims(const std::string &model, const JsonValue *
     else if (net_embed_cache->output_dtypes[0] == BM_BFLOAT16) d.mask_value = 0xC61C;
     else return "unsupported attention dtype (need fp16/bf16)";
 
-    const bm_net_info_t *b0 = netInfo(model, "block_0");
+    const bm_net_info_t *b0 = netInfoLocked(model, "block_0");
     d.support_history = b0 && b0->input_num == 5; /* 带 kv cache 输入 */
     d.PREFILL_KV_LENGTH = (d.support_history && b0) ? b0->stages[0].input_shapes[3].dims[1] : 0;
     d.is_dynamic = b0 && b0->is_dynamic;

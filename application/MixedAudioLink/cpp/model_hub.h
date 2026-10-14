@@ -4,6 +4,18 @@
 // 每个 bmodel 文件一个 bmrt 上下文；动态枚举子网；JSON 关键字映射角色；
 // 维度自动推导器（init_by_names 模式，JSON 仅作回退）。
 //
+// 【线程模型】（2026-10-14 明确）
+//   * 本类内部自带 shared_mutex：读接口（查询/枚举）持共享锁，写接口
+//     （init/deinit/unload/load/setNetEnabled/deriveAsrDims）持独占锁。
+//     因此任意线程并发调用本类的任意方法都是安全的（不会出现 map 迭代与
+//     插入/替换交错的 UB）。
+//   * 但**指针生命周期不在锁的保护范围内**：model()/netInfo() 返回的是裸指针，
+//     调用方拿到后锁即释放。若此刻另一线程 unload/load 该模型，SModel 会被
+//     析构（bmrt 句柄失效），裸指针即悬垂。
+//     => 推理线程与卸载/重载必须互斥：上层（CAudioLinkMng）在 unload/load
+//        前等待任务线程空闲，并在卸载后让 Link 走 onModelUnload 联动。
+//        本锁只保证"不会因并发访问容器本身而崩"，不替代这层协议。
+//
 //===----------------------------------------------------------------------===//
 #ifndef AL_MODEL_HUB_H
 #define AL_MODEL_HUB_H
@@ -11,7 +23,9 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -75,14 +89,26 @@ public:
     void deinit();
 
     bm_handle_t handle() const { return m_handle; }
-    bool hasModel(const std::string &name) const { return m_models.count(name) > 0; }
-    int modelCount() const { return (int)m_models.size(); }
+    bool hasModel(const std::string &name) const {
+        std::shared_lock<std::shared_mutex> lk(m_mtx);
+        return m_models.count(name) > 0;
+    }
+    int modelCount() const {
+        std::shared_lock<std::shared_mutex> lk(m_mtx);
+        return (int)m_models.size();
+    }
+    /** 取模型对象（裸指针）。调用方不得跨 unload/load 持有它 —— 见文件头"线程模型" */
     SModel *model(const std::string &name);
+    /** 取模型对象的共享引用（**推荐**，裸指针的安全替代）：锁内拷贝 shared_ptr，
+     *  调用方持有期间 SModel 对象不会被析构 —— 这正是 model() 无法保证的一点。
+     *  注意：只保证对象存活，不保证 bmrt 仍有效（unload 会销毁 bmrt 句柄），
+     *        因此用前仍须按上层协议确认目标模型处于已加载状态。 */
+    std::shared_ptr<SModel> modelRef(const std::string &name) const;
 
     /** 按角色取第一个匹配子网名（在 model 内）；找不到返回 "" */
     std::string netByRole(const std::string &model, const std::string &role) const;
     /** 按角色反查模型名（跨全部已加载模型）：返回首个含该角色子网的模型名，找不到返回 ""。
-     *  这是"模型名 <-> 角色"的唯一权威来源 —— Link 定位模型必须走它，不要各写一套键名规则。
+     *  这是"模型名 ↔ 角色"的唯一权威来源 —— Link 定位模型必须走它，不要各写一套键名规则。
      *  注意：unloadModel 会清空 role_of_net（模型保留、loaded=false），故卸载后本函数查不到，
      *        调用方应在 init 期解析一次并持有模型名。 */
     std::string modelByRole(const std::string &role) const;
@@ -102,12 +128,26 @@ public:
     std::string dumpNets() const;
 
     /** qwen3_asr 维度推导：对含 asr_llm/asr_audio 角色的模型调用一次 */
-    const AsrDims &asrDims() const { return m_asr_dims; }
+    /* 按值返回（内部持共享锁）：避免返回引用后锁已释放、与 deriveAsrDims 写竞争 */
+    AsrDims asrDims() const {
+        std::shared_lock<std::shared_mutex> lk(m_mtx);
+        return m_asr_dims;
+    }
     std::string deriveAsrDims(const std::string &model, const JsonValue *dims_cfg);
 
 private:
+    /** 无锁版本，仅供已持锁的成员函数内部调用（shared_mutex 不可重入）：
+     *  deinit() 加锁后转调它；init() 加载失败回滚也直接用它（此时已持独占锁）。 */
+    void deinitLocked();
+    /** 无锁版本，仅供已持锁的成员函数内部调用（shared_mutex 不可重入） */
+    SModel *modelLocked(const std::string &name) const;
+    const bm_net_info_t *netInfoLocked(const std::string &model, const std::string &net) const;
+    std::string netByRoleLocked(const std::string &model, const std::string &role) const;
+
     bm_handle_t m_handle = nullptr;
     bool m_handle_ok = false;
+    /* 保护 m_models / m_asr_dims：读接口共享锁、写接口独占锁 */
+    mutable std::shared_mutex m_mtx;
     std::map<std::string, std::shared_ptr<SModel>> m_models;
     AsrDims m_asr_dims;
     std::string m_last_err;

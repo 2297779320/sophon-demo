@@ -26,7 +26,7 @@ public:
             return E_AL_NET_NOT_MATCH;
         }
         m_net = hub.netByRole(m_model, "speaker");
-        if (m_net.empty()) m_net = hub.model(m_model)->net_names[0]; /* 单网模型取第一个 */
+        if (m_net.empty()) m_net = hub.modelRef(m_model)->net_names[0]; /* 单网模型取第一个 */
         m_info = hub.netInfo(m_model, m_net);
         if (!m_info) return E_AL_NET_NOT_MATCH;
         /* spk.emb_dim 与子网输出维度校验（不符仅告警，输出仍按模型实际维度取） */

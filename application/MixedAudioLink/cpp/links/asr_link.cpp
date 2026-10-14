@@ -330,7 +330,7 @@ int CAsrLink::forwardAudio(const float *chunks, int n_times, const std::vector<i
             bmrt_tensor_with_device(&outs[k], net_audio->stages[0].output_mems[k],
                                     net_audio->output_dtypes[k],
                                     net_audio->stages[0].output_shapes[k]);
-        if (!bmrt_launch_tensor_ex(hub.model(m_model)->bmrt, net_audio->name, ins.data(),
+        if (!bmrt_launch_tensor_ex(hub.modelRef(m_model)->bmrt, net_audio->name, ins.data(),
                                    net_audio->input_num, outs.data(), net_audio->output_num,
                                    true, false))
             return E_AL_LAUNCH_FAIL;
