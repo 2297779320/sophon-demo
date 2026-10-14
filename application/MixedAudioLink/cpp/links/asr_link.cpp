@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../al_out.h"   /* alCopyOut / alFormatOut：出参写入统一查截断 */
+
 namespace al {
 
 int CAsrLink::create(const JsonValue *cfg, AL_PARAM param) {
@@ -178,7 +180,7 @@ int CAsrLink::ctrl(const std::string &cmd, AL_PARAM param) {
             std::string js = "{\"max_new_tokens\":" + std::to_string(m_max_new_tokens) +
                              ",\"system_prompt\":\"" + sp + "\",\"enable_history\":" +
                              (m_enable_history ? "1" : "0") + ",\"language\":\"" + lg + "\"}";
-            snprintf((char *)param.data, param.size, "%s", js.c_str());
+            return al::alCopyOut(param, js);   /* 缓冲不足返回 E_AL_BUFFER_TOO_SMALL */
         }
         return E_AL_OK;
     }
@@ -192,7 +194,7 @@ int CAsrLink::ctrl(const std::string &cmd, AL_PARAM param) {
     if (cmd == "get_model_info") {
         if (param.data && param.size > 0) {
             const AsrDims &d = m_llm.dims();
-            snprintf((char *)param.data, param.size,
+            return al::alFormatOut(param,
                      "{\"loaded\":%s,\"layers\":%d,\"seqlen\":%d,\"max_input\":%d,\"hidden\":%d,"
                      "\"audio_length\":%d,\"tokens_per_sec\":%d,\"history\":%s}",
                      m_llm.ready() ? "true" : "false", d.NUM_LAYERS, d.SEQLEN,

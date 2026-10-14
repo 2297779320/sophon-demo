@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "../al_out.h"    /* alCopyOut / alFormatOut：出参写入统一查截断 */
 #include "../link_mng.h"
 
 namespace al {
@@ -68,7 +69,7 @@ public:
             for (auto &l : m_transcript)
                 full += (l.spk > 0 ? "讲话人" + std::to_string(l.spk) + "：" : "") + l.text + "\n";
             if (param.data && param.size > 0)
-                snprintf((char *)param.data, param.size, "%s", full.c_str());
+                return al::alCopyOut(param, full);   /* 转写文本可能很长，必须查截断 */
             return E_AL_OK;
         }
         if (cmd == "new_meeting") {
@@ -88,7 +89,7 @@ public:
                 oss << (i > 1 ? "," : "") << "{\"id\":" << i << ",\"lines\":" << cnt[i] << "}";
             oss << "]}";
             if (param.data && param.size > 0)
-                snprintf((char *)param.data, param.size, "%s", oss.str().c_str());
+                return al::alCopyOut(param, oss.str());
             return E_AL_OK;
         }
         /*---- 专用配置命令（数值统一 double 协议：AL_PARAM{&dVal, sizeof(double)}）----
@@ -136,7 +137,7 @@ public:
         if (cmd == "get_params") {
             std::lock_guard<std::mutex> lk(m_mtx);
             if (param.data && param.size > 0)
-                snprintf((char *)param.data, param.size,
+                return al::alFormatOut(param,
                          "{\"threshold\":%.4f,\"max_speakers\":%d}",
                          (double)m_threshold, m_max_speakers);
             return E_AL_OK;

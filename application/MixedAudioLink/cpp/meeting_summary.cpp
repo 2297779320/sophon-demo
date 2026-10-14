@@ -12,6 +12,7 @@
 
 #include "al_json.h"
 #include "al_log.h"
+#include "al_out.h"   /* alCopyOut / alFormatOut：出参写入统一查截断 */
 #include "al_path.h"
 #include "link_mng.h"      /* 复用 model_hub / text_llm / tokenizer */
 #include "text_llm.h"
@@ -266,8 +267,8 @@ int MeetingSummaryRun(AL_HANDLE h, const char *transcript, AL_PARAM out) {
             result = summaries[0];
         }
     }
-    snprintf((char *)out.data, out.size, "%s", result.c_str());
-    return E_AL_OK;
+    /* 摘要写回调用方缓冲：截断必须报 E_AL_BUFFER_TOO_SMALL，不能返回 OK */
+    return al::alCopyOut(out, result);
 }
 
 int MeetingSummaryRunFile(AL_HANDLE h, const char *text_path, AL_PARAM out) {
@@ -365,9 +366,7 @@ int MeetingSummaryCtrl(AL_HANDLE h, const char *cmd, AL_PARAM param) {
     CSummary *s = (CSummary *)h;
     std::string c = cmd;
     if (c == "get_last_error") {
-        if (param.data && param.size > 0)
-            snprintf((char *)param.data, param.size, "%s", s->last_err.c_str());
-        return E_AL_OK;
+        return al::alCopyOut(param, s->last_err);
     }
     if (c == "set_prompt") {
         if (!param.data || param.size <= 0) {
@@ -408,7 +407,7 @@ int MeetingSummaryCtrl(AL_HANDLE h, const char *cmd, AL_PARAM param) {
     if (c == "get_model_info") {
         if (param.data && param.size > 0) {
             const AsrDims &d = s->llm.dims();
-            snprintf((char *)param.data, param.size,
+            return al::alFormatOut(param,
                      "{\"loaded\":%s,\"seqlen\":%d,\"max_input\":%d,\"max_new_tokens\":%d,"
                      "\"last_ftl_ms\":%.1f,\"last_tps\":%.2f,\"last_tok_num\":%d}",
                      s->llm.ready() ? "true" : "false", d.SEQLEN, d.MAX_INPUT_LENGTH,

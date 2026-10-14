@@ -14,6 +14,7 @@
 #include <mutex>
 #include <vector>
 
+#include "../al_out.h"    /* alFormatOut：出参写入统一查截断 */
 #include "../al_resample.h"
 #include "../link_mng.h"
 
@@ -167,7 +168,7 @@ public:
         }
         if (cmd == "get_params") {
             if (param.data && param.size > 0)
-                snprintf((char *)param.data, param.size,
+                return al::alFormatOut(param,
                          "{\"ring_ms\":%d,\"input_fmt\":{\"sample_rate\":%d,\"channels\":%d,\"bits\":%d}}",
                          iRingMs, iInRate, iInCh, iInBits);
             return E_AL_OK;

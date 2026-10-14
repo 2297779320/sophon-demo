@@ -15,6 +15,7 @@
 
 #include "al_json.h"
 #include "al_log.h"
+#include "al_out.h"   /* alCopyOut：出参写入统一查截断 */
 #include "al_path.h"
 
 namespace al {
@@ -398,29 +399,22 @@ int CLinkMng::ctrl(const char *name, const char *cmd, AL_PARAM param) {
     /* 管理器级（通用命令；工作流专属命令由 onCtrl 钩子兜底） */
     if (n.empty()) {
         if (c == "get_last_error") {
-            if (param.data && param.size > 0) {
-                std::string e = lastError();
-                snprintf((char *)param.data, param.size, "%s", e.c_str());
-            }
-            return E_AL_OK;
+            /* 出参缓冲不足不再静默返回 OK：返回 E_AL_BUFFER_TOO_SMALL，
+             * 调用方可按 audio_link.h 标注的 char[256] 重来 */
+            return al::alCopyOut(param, lastError());
         }
         if (c == "get_stats") {
-            if (param.data && param.size > 0) {
-                /* 通用统计字段 + 工作流增量字段（appendStats 钩子）后再闭合 */
-                std::string js = "{\"dropped_pcm_bytes\":" +
-                                 std::to_string((long long)m_dropped_bytes.load()) +
-                                 ",\"task_busy\":" + (m_task_busy.load() ? "true" : "false") +
-                                 ",\"self_heal_count\":" + std::to_string(m_self_heal_count.load());
-                appendStats(js);
-                js += "}";
-                snprintf((char *)param.data, param.size, "%s", js.c_str());
-            }
-            return E_AL_OK;
+            /* 通用统计字段 + 工作流增量字段（appendStats 钩子）后再闭合 */
+            std::string js = "{\"dropped_pcm_bytes\":" +
+                             std::to_string((long long)m_dropped_bytes.load()) +
+                             ",\"task_busy\":" + (m_task_busy.load() ? "true" : "false") +
+                             ",\"self_heal_count\":" + std::to_string(m_self_heal_count.load());
+            appendStats(js);
+            js += "}";
+            return al::alCopyOut(param, js);
         }
         if (c == "list_nets") {
-            if (param.data && param.size > 0)
-                snprintf((char *)param.data, param.size, "%s", m_hub.dumpNets().c_str());
-            return E_AL_OK;
+            return al::alCopyOut(param, m_hub.dumpNets());
         }
         if (c == "set_log") {
             /* param.data = int 级别：-1=关闭日志，0..3=AL_LOG_ERROR..DEBUG */

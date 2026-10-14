@@ -12,6 +12,7 @@
 #include <string>
 
 #include "al_log.h"
+#include "al_out.h"   /* alCopyOut：出参写入统一查截断 */
 #include "audio_link_mng.h"
 
 using namespace al;
@@ -103,9 +104,7 @@ int AudioLinkCtrl(AL_HANDLE mgr, const char *name, const char *strCmd, AL_PARAM 
     if (!mgr) {
         /* Init 失败（句柄 NULL）后仅 "get_last_error" 可查：读静态最近错误 */
         if (std::string(strCmd) == "get_last_error") {
-            if (param.data && param.size > 0)
-                snprintf((char *)param.data, param.size, "%s", getInitError().c_str());
-            return E_AL_OK;
+            return al::alCopyOut(param, getInitError());
         }
         return E_AL_NOT_INIT;
     }

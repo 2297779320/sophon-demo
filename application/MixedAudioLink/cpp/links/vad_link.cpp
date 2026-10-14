@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "../al_json.h"   /* JsonValue 完整定义（link_mng.h 仅前置声明） */
+#include "../al_out.h"    /* alFormatOut：出参写入统一查截断 */
 
 namespace al {
 
@@ -333,7 +334,7 @@ int CVadLink::ctrl(const std::string &cmd, AL_PARAM param) {
     if (cmd == "get_params") {
         if (!param.data || param.size <= 0)
             return mng()->setLastError("vad.get_params: empty param"), E_AL_PARAM_ERR;
-        snprintf((char *)param.data, param.size,
+        return al::alFormatOut(param,
                  "{\"max_end_silence_ms\":%d,\"sil_to_speech_time_ms\":%d,"
                  "\"speech_to_sil_time_ms\":%d,\"max_single_segment_ms\":%d,"
                  "\"max_seg_s\":%d,\"speech_noise_thres\":%.4f,"
@@ -342,7 +343,6 @@ int CVadLink::ctrl(const std::string &cmd, AL_PARAM param) {
                  m_seg.cfg().speech_to_sil_ms, m_seg.cfg().max_single_seg_ms,
                  m_seg.cfg().max_single_seg_ms / 1000, (double)m_noise_thres,
                  bGateEnable ? 1 : 0, iGateRms.load(), iGateHoldMs.load());
-        return E_AL_OK;
     }
 
     (void)param;
