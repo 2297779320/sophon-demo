@@ -52,12 +52,16 @@ inline bool readNpyF32(const std::string &path, std::vector<float> &out, int &ro
         if (p == std::string::npos) return "";
         p = header.find(':', p + k.size());
         if (p == std::string::npos) return "";
-        /* 值为 'xxx' 或 数字 */
-        size_t q = header.find_first_of("'0123456789-", p + 1);
+        /* 值为 'xxx' / 数字 / (元组) */
+        size_t q = header.find_first_of("'0123456789-(", p + 1);
         if (q == std::string::npos) return "";
         if (header[q] == '\'') {
             size_t e = header.find('\'', q + 1);
             return header.substr(q + 1, e - q - 1);
+        }
+        if (header[q] == '(') {   /* 元组整段返回，各维由调用方解析 */
+            size_t e = header.find(')', q);
+            return (e == std::string::npos) ? header.substr(q) : header.substr(q, e - q + 1);
         }
         size_t e = header.find_first_of(",})", q);
         return header.substr(q, e - q);
@@ -66,21 +70,34 @@ inline bool readNpyF32(const std::string &path, std::vector<float> &out, int &ro
     if (descr.find('f') == std::string::npos || descr.find("4") == std::string::npos) { fclose(fp); return false; }
     std::string shape = findField("shape");
     rows = 1; cols = 1;
-    {   /* shape 形如 "(80,)" 或 "(80, 1)" */
-        size_t comma = shape.find(',');
-        try {
-            if (comma == std::string::npos) cols = std::stoi(shape);
-            else {
-                rows = std::stoi(shape.substr(0, comma));
-                std::string rest = shape.substr(comma + 1);
-                size_t nz = rest.find_first_not_of(" \t");
-                cols = (nz == std::string::npos) ? 1 : std::stoi(rest.substr(nz));
-            }
-        } catch (...) { fclose(fp); return false; }
+    size_t total = 0;
+    {   /* shape 形如 "80" / "(80,)" / "(128, 201)" / "(1, 128, 201)"。
+         * 注意：旧实现只取第一个数字，2-D 的 (128, 201) 被读成 rows=1, cols=128，
+         *       导致 mel_filters.npy 静默走回退分支 —— 多维必须逐维解析。
+         * 元素总数 = 各维之积（>2 维时不再是 rows*cols）；
+         * rows/cols 取倒数第二/最后一维（2-D 即首/次维，与调用方约定一致）。 */
+        std::string s = shape;
+        size_t lp = s.find('('), rp = s.find(')');
+        if (lp != std::string::npos)
+            s = s.substr(lp + 1, (rp == std::string::npos ? std::string::npos : rp - lp - 1));
+        std::vector<int> dims;
+        for (size_t p = 0; p < s.size();) {
+            size_t nz = s.find_first_of("0123456789", p);
+            if (nz == std::string::npos) break;
+            size_t e = s.find_first_not_of("0123456789", nz);
+            if (e == std::string::npos) e = s.size();
+            try { int v = std::stoi(s.substr(nz, e - nz)); dims.push_back(v); }
+            catch (...) { fclose(fp); return false; }
+            p = e;
+        }
+        if (dims.empty()) { fclose(fp); return false; }
+        rows = (dims.size() >= 2) ? dims[dims.size() - 2] : 1;
+        cols = dims[dims.size() - 1];
+        total = 1;
+        for (int v : dims) total *= (size_t)(v > 0 ? v : 0);
     }
-    size_t total = (size_t)rows * cols;
     out.resize(total);
-    if (fread(out.data(), sizeof(float), total, fp) != total) { fclose(fp); return false; }
+    if (total && fread(out.data(), sizeof(float), total, fp) != total) { fclose(fp); return false; }
     fclose(fp);
     /* 转主机字节序（npy 为小端，x86/ARM 均为小端，无需转换） */
     return true;

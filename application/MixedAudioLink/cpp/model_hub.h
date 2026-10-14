@@ -29,7 +29,7 @@ struct AsrDims {
     int HIDDEN_SIZE = 0;
     int NUM_LAYERS = 0;
     int AUDIO_LENGTH = 0;      /* audio 子网输入最后一维（mel 帧数/块） */
-    int AUDIO_MEL_BINS = 0;    /* audio 子网输入 dims[1]（128） */
+    int AUDIO_MEL_BINS = 0;    /* audio 子网输入倒数第 2 维（mel bins，实测 128） */
     int KV_BYTES = 0;          /* 单 token KV 字节数 */
     int PREFILL_KV_LENGTH = 0; /* support_history 时 block_0 的 kv 输入长度 */
     uint16_t mask_value = 0;   /* fp16=0xF0E2 / bf16=0xC61C */

@@ -38,8 +38,24 @@ int CAsrLink::create(const JsonValue *cfg, AL_PARAM param) {
     /* audio 编码子网 */
     std::string audio_net = hub.netByRole(m_model, "asr_audio");
     if (audio_net.empty()) audio_net = "audio";
-    if (!hub.netInfo(m_model, audio_net)) return E_AL_NET_NOT_MATCH;
+    const bm_net_info_t *net_audio = hub.netInfo(m_model, audio_net);
+    if (!net_audio) return E_AL_NET_NOT_MATCH;
     m_audio_net = audio_net;
+
+    /* mel 每块样本数必须与设备输入字节数严格相等：forwardAudio 以 in_bytes 为步长
+     * 从 host mel 缓冲逐块取值，任何不一致（含维度推导取错下标）都会越界读。
+     * 此处启动即校验，把静默越界变成显式拒绝启动。 */
+    {
+        size_t in_bytes = bm_mem_get_device_size(net_audio->stages[0].input_mems[0]);
+        size_t per_chunk_bytes = (size_t)d.AUDIO_MEL_BINS * (size_t)d.AUDIO_LENGTH * sizeof(float);
+        if (d.AUDIO_MEL_BINS <= 0 || d.AUDIO_LENGTH <= 0 || per_chunk_bytes != in_bytes) {
+            mng()->logErr("asr audio net shape mismatch: in_bytes=" + std::to_string(in_bytes) +
+                          " != mel_bins*audio_length*4=" + std::to_string(per_chunk_bytes) +
+                          " (mel_bins=" + std::to_string(d.AUDIO_MEL_BINS) +
+                          ", audio_length=" + std::to_string(d.AUDIO_LENGTH) + ")");
+            return E_AL_NET_NOT_MATCH;
+        }
+    }
 
     /* mel 前处理 */
     AsrMel::Config mc;
@@ -53,6 +69,10 @@ int CAsrLink::create(const JsonValue *cfg, AL_PARAM param) {
                    std::to_string(d.AUDIO_MEL_BINS));
     mc.feature_size = d.AUDIO_MEL_BINS;
     m_mel.init(mc);
+    /* 静默回退显式化：配了 mel_filters 却因形状不符未加载，前端会走 slaney 近似，
+     * 数值与官方 whisper 滤波器组不同（CER 基线会漂），必须留痕 */
+    if (!mc.mel_filters_npy.empty() && !m_mel.filtersLoaded())
+        mng()->log("warn: mel_filters not loaded, fallback to slaney filterbank: " + mc.mel_filters_npy);
 
     /* tokenizer（相对路径以启动 JSON 所在目录为基准解析） */
     std::string vocab = mng()->resolveAsset(asr_cfg ? asr_cfg->getStr("vocab", "vocab.json") : "vocab.json");
@@ -194,6 +214,7 @@ int CAsrLink::processSegment(const std::vector<float> &mel, bool is_final, std::
 
     const AsrDims &d = m_llm.dims();
     int per_chunk = d.AUDIO_MEL_BINS * d.AUDIO_LENGTH;
+    if (per_chunk <= 0) return E_AL_NET_NOT_MATCH;   /* 维度未推导成功：避免除零 */
     int n_times = (int)(mel.size() / per_chunk);
     if (n_times <= 0) return E_AL_NO_FRAME;
 

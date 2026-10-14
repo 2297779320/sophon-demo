@@ -264,8 +264,14 @@ std::string CModelHub::deriveAsrDims(const std::string &model, const JsonValue *
     const bm_net_info_t *bc0 = netInfo(model, "block_cache_0");
     d.SEQLEN = bc0 ? bc0->stages[0].input_shapes[3].dims[1] : 0;
     if (has_audio) {
-        d.AUDIO_MEL_BINS = net_audio->stages[0].input_shapes[0].dims[1];
-        d.AUDIO_LENGTH = net_audio->stages[0].input_shapes[0].dims[3];
+        /* 业务维度一律取**末尾两维**，勿写死 dims[1]/dims[3]：audio 子网输入带
+         * batch/channel（unsqueeze）等前导维，实测 Qwen3-ASR 签名
+         * input_states [1,1,128,100] → mel = dims[n-2] = 128、每块帧数 = dims[n-1] = 100。
+         * 写死 dims[1] 会取到 1，令 mel 前端与 host 缓冲步进整体错位（含越界读）。 */
+        const bm_shape_t &ash = net_audio->stages[0].input_shapes[0];
+        int nd = ash.num_dims;
+        d.AUDIO_MEL_BINS = (nd >= 2) ? ash.dims[nd - 2] : 0;
+        d.AUDIO_LENGTH = (nd >= 1) ? ash.dims[nd - 1] : 0;
     } else {
         d.AUDIO_MEL_BINS = 0;
         d.AUDIO_LENGTH = 0;

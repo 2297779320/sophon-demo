@@ -43,13 +43,19 @@ public:
             m_win[i] = 0.5f - 0.5f * std::cos(2.0f * (float)M_PI * i / m_nfft); /* hann（torch 默认 periodic） */
         if ((m_nfft > 0) && (m_nfft & (m_nfft - 1)) != 0)
             initBluestein();   /* n_fft 非 2 的幂（400）时准备 chirp-z 卷积核 */
-        if (!loadFiltersNpy(cfg.mel_filters_npy))
+        if (!loadFiltersNpy(cfg.mel_filters_npy)) {
             buildSlaneyFilterbank(cfg.feature_size, cfg.sample_rate, m_nfft);
+            m_filters_loaded = false;
+        } else {
+            m_filters_loaded = true;
+        }
     }
 
     int bins() const { return m_cfg.feature_size; }
     int framesPerSec() const { return m_cfg.sample_rate / m_cfg.hop_length; }   /* 100 */
     int audioLength() const { return m_cfg.audio_length; }
+    /** mel_filters.npy 是否真的加载成功；false = 走了 slaney 回退（形状不符时静默发生） */
+    bool filtersLoaded() const { return m_filters_loaded; }
 
     /**
      * pcm → mel [n_chunks, 128, AUDIO_LENGTH]（行优先展平进 out）。
@@ -230,6 +236,7 @@ private:
 
     Config m_cfg;
     int m_nfft = 400;   /* n_fft（非 2 的幂时走 Bluestein/chirp-z） */
+    bool m_filters_loaded = false;   /* mel_filters.npy 加载结果（供调用方显式告警） */
     std::vector<float> m_win;
     std::vector<std::vector<float>> m_filters;
     /* Bluestein 预计算（n_fft 为 2 的幂时未初始化，fftN 不会用到） */
