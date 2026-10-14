@@ -28,15 +28,9 @@ namespace al {
 /* init 末尾钩子：按角色定位 asr 模型 → 维度推导 → 默认链路 → 连线
  * （pcm→vad 拉模型 + feat→asr mel128 支路回调），全部音频工作流专属 */
 int CAudioLinkMng::createLinks() {
-    /* 按角色定位各能力所属模型名 */
-    const JsonValue *models_cfg = section("models");
-    for (auto &kv : models_cfg->obj) {
-        auto roles = kv.second->get("roles");
-        if (!roles) continue;
-        for (auto &rk : roles->obj) {
-            if (rk.first == "asr_llm") strAsrModel = kv.first;
-        }
-    }
+    /* 按角色定位 asr 模型名：与 CAsrLink::create() 共用 CLinkMng::asrModelName()，
+     * 不再在本类另扫一遍 JSON（两套规则会因键名变更而漂移） */
+    strAsrModel = asrModelName();
     if (!strAsrModel.empty()) {
         std::string warn = hub().deriveAsrDims(strAsrModel, section("dims"));
         if (!warn.empty()) log("dims warn: " + warn);

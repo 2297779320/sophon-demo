@@ -189,6 +189,17 @@ std::string CModelHub::netByRole(const std::string &model, const std::string &ro
     return "";
 }
 
+std::string CModelHub::modelByRole(const std::string &role) const {
+    if (role.empty()) return "";
+    /* m_models 为 std::map（按键名有序），多模型命中同一角色时结果稳定 */
+    for (auto &kv : m_models) {
+        if (!kv.second) continue;
+        for (auto &rn : kv.second->role_of_net)
+            if (rn.second == role) return kv.first;
+    }
+    return "";
+}
+
 const bm_net_info_t *CModelHub::netInfo(const std::string &model, const std::string &net) const {
     auto it = m_models.find(model);
     if (it == m_models.end()) return nullptr;

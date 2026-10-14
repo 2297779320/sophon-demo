@@ -19,8 +19,12 @@ public:
     int create(const JsonValue *cfg, AL_PARAM param) override {
         (void)cfg; (void)param;
         CModelHub &hub = mng()->hub();
-        if (!hub.hasModel("spk")) { mng()->log("spk model must be named 'spk' in JSON models"); return E_AL_NET_NOT_MATCH; }
-        m_model = "spk";
+        /* 模型名唯一来源：按角色 speaker 反查，无角色配置时退回键名 "spk" */
+        m_model = mng()->modelNameByRole("speaker", "spk");
+        if (m_model.empty()) {
+            mng()->logErr("spk model not found: neither a model with role 'speaker' nor an 'spk' key");
+            return E_AL_NET_NOT_MATCH;
+        }
         m_net = hub.netByRole(m_model, "speaker");
         if (m_net.empty()) m_net = hub.model(m_model)->net_names[0]; /* 单网模型取第一个 */
         m_info = hub.netInfo(m_model, m_net);

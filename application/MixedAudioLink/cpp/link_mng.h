@@ -115,6 +115,12 @@ public:
     int ctrl(const char *name, const char *cmd, AL_PARAM param);
 
     CModelHub &hub() { return m_hub; }
+    /** 模型名的**唯一来源**：按角色 role 跨模型反查，无角色配置时退回键名 fallbackKey。
+     *  各 Link（asr/spk/vad）定位模型必须走它，不要各写一套键名规则 ——
+     *  否则键一改名就会出现"开得了、卸不掉"。
+     *  返回空串 = 既无该角色、也无同名模型键。 */
+    std::string modelNameByRole(const std::string &role, const std::string &fallbackKey) const;
+    std::string asrModelName() const;   /* = modelNameByRole("asr_llm", "asr") */
     const JsonValue *rootCfg() const { return m_cfg.get(); }
     const JsonValue *section(const std::string &key) const;
 

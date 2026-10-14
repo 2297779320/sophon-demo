@@ -63,9 +63,12 @@ int CVadLink::create(const JsonValue *cfg, AL_PARAM param) {
     /* 定位模型与子网 */
     CModelHub &hub = mng()->hub();
     m_model = ""; m_net = "";
-    /* 管理器约定 VAD 模型名为 JSON models 下的 "vad" 键 */
-    if (hub.hasModel("vad")) m_model = "vad";
-    else { mng()->log("vad model must be named 'vad' in JSON models"); return E_AL_NET_NOT_MATCH; }
+    /* 模型名唯一来源：按角色 vad 反查，无角色配置时退回键名 "vad" */
+    m_model = mng()->modelNameByRole("vad", "vad");
+    if (m_model.empty()) {
+        mng()->logErr("vad model not found: neither a model with role 'vad' nor an 'vad' key");
+        return E_AL_NET_NOT_MATCH;
+    }
     m_net = hub.netByRole(m_model, "vad");
     if (m_net.empty()) { mng()->log("no net with role 'vad'"); return E_AL_NET_NOT_MATCH; }
     m_info = hub.netInfo(m_model, m_net);

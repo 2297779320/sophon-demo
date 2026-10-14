@@ -364,6 +364,16 @@ int CLinkMng::start() {
     return E_AL_OK;
 }
 
+std::string CLinkMng::modelNameByRole(const std::string &role, const std::string &fallbackKey) const {
+    std::string n = m_hub.modelByRole(role);
+    if (n.empty() && m_hub.hasModel(fallbackKey)) n = fallbackKey;
+    return n;
+}
+
+std::string CLinkMng::asrModelName() const {
+    return modelNameByRole("asr_llm", "asr");
+}
+
 /** start() 失败回滚：逆序停掉已启动的 link（不含失败者本身，它没起来） */
 void CLinkMng::rollbackStarted(const std::vector<std::string> &started) {
     std::lock_guard<std::mutex> lk(m_links_mtx);

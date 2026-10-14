@@ -27,10 +27,15 @@ int CAsrLink::create(const JsonValue *cfg, AL_PARAM param) {
         m_language = asr_cfg->getStr("language", "");   /* null/缺省 = 自动 */
     }
 
-    /* 模型定位：JSON models 键名约定为 "asr" */
+    /* 模型定位：唯一来源 = 按角色 asr_llm 反查（与 audio_link_mng 的 unload/重载门禁同源）。
+     * 不再硬编码键名 "asr" —— 否则键一改名就会出现"开得了、卸不掉"。 */
     CModelHub &hub = mng()->hub();
-    if (!hub.hasModel("asr")) { mng()->log("asr model must be named 'asr' in JSON models"); return E_AL_NET_NOT_MATCH; }
-    m_model = "asr";
+    std::string model = mng()->asrModelName();
+    if (model.empty()) {
+        mng()->logErr("asr model not found: neither a model with role 'asr_llm' nor an 'asr' key");
+        return E_AL_NET_NOT_MATCH;
+    }
+    m_model = model;
 
     /* LLM 公共路径（子网发现/KV/dev_buffer） */
     int rc = m_llm.init(hub, m_model);

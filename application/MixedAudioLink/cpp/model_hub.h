@@ -81,6 +81,11 @@ public:
 
     /** 按角色取第一个匹配子网名（在 model 内）；找不到返回 "" */
     std::string netByRole(const std::string &model, const std::string &role) const;
+    /** 按角色反查模型名（跨全部已加载模型）：返回首个含该角色子网的模型名，找不到返回 ""。
+     *  这是"模型名 <-> 角色"的唯一权威来源 —— Link 定位模型必须走它，不要各写一套键名规则。
+     *  注意：unloadModel 会清空 role_of_net（模型保留、loaded=false），故卸载后本函数查不到，
+     *        调用方应在 init 期解析一次并持有模型名。 */
+    std::string modelByRole(const std::string &role) const;
     const bm_net_info_t *netInfo(const std::string &model, const std::string &net) const;
 
     /** 子网启停标记（Ctrl enable/disable 维护 disabled 集合，list_nets 可查） */
